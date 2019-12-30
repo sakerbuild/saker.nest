@@ -1,0 +1,369 @@
+# UPDATE saker.nest.meta.Versions when updating this value
+global(saker.nest.VERSION) = "0.8.0"
+global(VERSION_saker.apiextract) = "0.8.0"
+global(VERSION_sipka.cmdline) = "0.8.0"
+
+static(VERSION_saker.build) = nest.dependency.resolve(
+	saker.build,
+	Filters: nest.dependency.filter.kind([]),
+)[Bundles][0][BundleIdentifier][VersionNumber]
+
+compile(
+	out main,
+	out action,
+	out testapicompile,
+	
+	in buildconfig = include(_configure)[buildconfig], 
+) {
+	$testapicompile = saker.java.compile(
+		SourceDirectories: [
+			test/api/,
+			($buildconfig[Testing] ? test/enabled/ : test/disabled/),
+		],
+		ClassPath: [
+			saker.java.classpath.bundle("saker.build-api-v{ static(VERSION_saker.build) }")
+		],
+		Identifier: "testapi{ $buildconfig[TestingId] }",
+	)
+	
+	$main = saker.java.compile(
+		SourceDirectories: [
+			src,
+			json,
+		],
+		ClassPath: [
+			$testapicompile,
+			saker.java.classpath.bundle("sipka.cmdline-api-v{ global(VERSION_sipka.cmdline) }"),
+			saker.java.classpath.bundle("sipka.cmdline-runtime-v{ global(VERSION_sipka.cmdline) }"),
+			saker.java.classpath.bundle("saker.apiextract-api-v{ global(VERSION_saker.apiextract) }"),
+		],
+		Identifier: "main{ $buildconfig[TestingId] }{ $buildconfig[ApiDocId] }",
+		CompilerOptions: $buildconfig[JavaCompilerOptions],
+	)
+	
+	$action = saker.java.compile(
+		SourceDirectories: action,
+		ClassPath: [
+			$main,
+		],
+		AnnotationProcessors: [
+			{
+				Processor: saker.java.processor.bundle(
+					Bundle: "sipka.cmdline-processor-v{ global(VERSION_sipka.cmdline) }",
+					Class: sipka.cmdline.processor.CommandLineProcessor,
+				),
+				Aggregating: false,
+				SuppressWarnings: [ 
+					LastRoundGeneration,
+				],
+				Options: {
+					sipka.cmdline.help.generate.reference: true,
+				},
+			}
+		],
+		Identifier: "action{ $buildconfig[TestingId] }{ $buildconfig[ApiDocId] }",
+		CompilerOptions: $buildconfig[JavaCompilerOptions],
+	)
+}
+apicompile(
+	out compile,
+) {
+	$compile = include(compile, buildconfig: include(_configure, apidoc: true)[buildconfig])
+}
+apiexport(
+	out jar,
+){
+	$compile = include(apicompile)[compile]
+	$jar = saker.jar.create(
+		Output: saker.nest-api.jar,
+		Resources: [
+			{
+				Directory: "{$compile[main][ResourceDirectory]}/API_OUTPUT",
+				Resources: **/*.class,
+			},
+		],
+		Manifest: {
+			MainAttributes: {
+				Nest-Bundle-Format-Version: 1,
+				Nest-Bundle-Identifier: "saker.nest-api-v{ global(saker.nest.VERSION) }",
+				Nest-Bundle-Source: "saker.nest-sources-v{ global(saker.nest.VERSION) }",
+			},
+		},
+	)
+}
+export(
+	out compile,
+	out jar,
+	out Path = $jar[Path],
+	
+	in buildconfig = include(_configure)[buildconfig], 
+) {
+	$compile = include(compile, buildconfig: $buildconfig)
+	$main = $compile[main]
+	$action = $compile[action]
+	$jar = saker.jar.create(
+		Output: $buildconfig[Testing] ? saker.nest-test.jar : saker.nest.jar,
+		Resources: [
+			{
+				Directory: $main[ClassDirectory],
+				Resources: saker/nest/**/*.class,
+			},
+			{
+				Directory: $action[ClassDirectory],
+				Resources: saker/nest/**/*.class,
+				TargetDirectory: internal/action,
+			},
+			{
+				Directory: resources,
+				Resources: **,
+			},
+		],
+		Includes: [
+			{
+				Archive: nest.bundle.download("sipka.cmdline-runtime-v{ global(VERSION_sipka.cmdline) }")[BundlePaths][0],
+				Resources: sipka/cmdline/runtime/**/*.class,
+				TargetDirectory: internal/action,
+			},
+		],
+		Services: {
+			saker.build.runtime.repository.SakerRepositoryFactory: saker.nest.NestRepositoryFactory,
+		},
+		Manifest: {
+			MainAttributes: {
+				Nest-Bundle-Format-Version: 1,
+				Nest-Bundle-Identifier: "saker.nest{ $buildconfig[Testing] ? "-test" : "" }-v{ global(saker.nest.VERSION) }",
+				Nest-Bundle-Source: "saker.nest-sources-v{ global(saker.nest.VERSION) }",
+			},
+		},
+	)
+}
+exportall(
+	out bundlepaths = [
+		$export[Path],
+		$apiexport[jar][Path],
+		$testexport[export][Path],
+		$testexport[testutiljar][Path],
+		$testexport[instrumentedsakerjar][Path],
+		$sourcejar[Path],
+	]
+){
+	$export = include(export)
+	$apiexport = include(apiexport)
+	$testexport = include(testexport)
+	$sourcejar = saker.jar.create(
+		Output: saker.nest-sources.jar,
+		Resources: [
+			{
+				Directory: [
+					src/,
+					action/,
+					json/,
+					test/api/,
+					test/disabled/,
+					test/util/,
+					$export[compile][action][SourceGenDirectory],
+				],
+				Resources: **/*.java
+			}
+		],
+		Manifest: {
+			MainAttributes: {
+				Nest-Bundle-Format-Version: 1,
+				Nest-Bundle-Identifier: "saker.nest-sources-v{ global(saker.nest.VERSION) }",
+			},
+		},
+	)
+}
+install() {
+	$exportall = include(exportall)
+	nest.local.install($exportall[bundlepaths])
+}
+upload() {
+	$export = include(export, Path: saker.build)
+	include(Path: secret/secrets.build)
+	nest.server.upload(
+		Bundles: $export[jar][Path],
+		APIKey: global(saker.nest.UPLOAD_API_KEY),
+		APISecret: global(saker.nest.UPLOAD_API_SECRET),
+		Overwrite: true,
+	)
+}
+testexport(
+	in export = include(export, buildconfig: include(_configure, testing: true)[buildconfig]),
+	out export,
+	in compile = $export[compile],
+	
+	out compile,
+	out testutiljar,
+	out testutiljavac,
+	out instrumentedsakerjar,
+) {
+	$testutiljavac = saker.java.compile(
+		SourceDirectories: test/util/,
+		ClassPath:[
+			saker.java.classpath.bundle([
+				"saker.build-test-v{ static(VERSION_saker.build) }",
+				"saker.build-test-runner-v{ static(VERSION_saker.build) }",
+				"saker.build-test-utils-v{ static(VERSION_saker.build) }",
+			]),
+			$export[compile][testapicompile],
+		],
+		Identifier: test-utils,
+	)
+	$testutiljar = saker.jar.create(
+		Output: saker.nest-test-utils.jar,
+		Resources: [
+			{
+				Directory: $testutiljavac[ClassDirectory],
+				Resources: **,
+			},
+		],
+		Manifest: {
+			MainAttributes: {
+				Nest-Bundle-Format-Version: 1,
+				Nest-Bundle-Identifier: "saker.nest-test-utils-v{ global(saker.nest.VERSION) }",
+				Nest-Bundle-Source: "saker.nest-sources-v{ global(saker.nest.VERSION) }",
+			},
+		},
+	)
+	$instrumentedsakerjar = saker.jar.create(
+		Output: saker.nest-test-saker.build.jar,
+		Resources: [
+			{
+				Directory: $compile[testapicompile][ClassDirectory],
+				Resources: **,
+			},
+		],
+		Includes: [
+			{
+				Archive: nest.bundle.download("saker.build-test-v{ static(VERSION_saker.build) }")[BundlePaths][0],
+				Resources: **,
+			},
+		],
+		Manifest: {
+			MainAttributes: {
+				Nest-Bundle-Format-Version: 1,
+				Nest-Bundle-Identifier: "saker.nest-test-saker.build-v{ global(saker.nest.VERSION) }",
+				Nest-Bundle-Source: "saker.nest-sources-v{ global(saker.nest.VERSION) }",
+			},
+		},
+	)
+}
+test() {
+	$testexport = include(testexport)
+	$export = $testexport[export]
+	$compile = $export[compile]
+	
+	$testcompile = saker.java.compile(
+		SourceDirectories: test/src,
+		ClassPath: [
+			$compile[main],
+			$testexport[testutiljavac],
+		],
+		Identifier: test,
+	)
+	
+	$unittest = saker.java.test(
+		TestRunnerClassPath: [
+			saker.java.classpath.bundle("saker.build-test-runner-v{ static(VERSION_saker.build) }"),
+		],
+		ClassPath: [
+			$testexport[instrumentedsakerjar][Path],
+			$compile[main][ClassDirectory],
+			$compile[testapicompile][ClassDirectory],
+		],
+		TestInvokerClass: testing.saker.SakerJavaTestingInvoker,
+		TestClassPath:	[ 
+			$testcompile[ClassDirectory],
+			$testexport[testutiljavac][ClassDirectory],
+			saker.java.classpath.bundle("saker.build-test-utils-v{ static(VERSION_saker.build) }"),
+		],
+		TestClasses: [
+			**.unit.**.*Test
+		],
+		NonDeterministicTests: [
+			**,
+		],
+		MaxJVMCount: 1,
+		FailFast: true,
+		AbortOnFail: true,
+		Verbose: true,
+	)
+	
+	$integrationtest = saker.java.test(
+		TestRunnerClassPath: [
+			saker.java.classpath.bundle("saker.build-test-runner-v{ static(VERSION_saker.build) }"),
+		],
+		ClassPath: [
+			$testexport[instrumentedsakerjar][Path],
+			$compile[testapicompile][ClassDirectory],
+		],
+		TestInvokerClass: testing.saker.SakerJavaTestingInvoker,
+		TestClassPath:	[ 
+			$testcompile[ClassDirectory],
+			$testexport[testutiljavac][ClassDirectory],
+			saker.java.classpath.bundle("saker.build-test-utils-v{ static(VERSION_saker.build) }"),
+		],
+		DependencyClassPath: [
+			$compile[main],
+			$testexport[testutiljavac],
+		],
+		TestClasses: [
+			**.integration.**.*Test
+		],
+		NonDeterministicTests: [
+			**,
+		],
+		TestInvokerParameters: {
+			SakerJarPath: nest.bundle.localize("saker.build-test-v{ static(VERSION_saker.build) }")[BundleLocalPaths][0],
+			TestsBaseBuildDirectory: std.file.mirror.path(std.file.place(test/build)),
+		},
+		TestClassParameters: {
+			**: {
+				NestRepositoryJar: std.file.mirror($export[Path]),
+			}
+		},
+		IgnoreFileChanges: [
+			std.file.place(test/build),
+			$export[Path],
+		],
+		#ProcessJVMArguments: [ "-agentlib:jdwp=transport=dt_socket,address=localhost:5432,server=y,suspend=y,quiet=y" ],
+		MaxJVMCount: 1,
+		FailFast: true,
+		AbortOnFail: true,
+		Verbose: true,
+	)
+}
+
+
+_configure(
+	in testing = false,
+	in apidoc = false,
+	
+	out buildconfig,
+) {
+	$buildconfig = {
+		Testing: $testing,
+		TestingId: $testing ? "-testing" : "",
+		ApiDocId: $apidoc ? "-apidoc" : "",
+		JavaCompilerOptions: [
+			{
+				Identifier: -apidoc,
+				AnnotationProcessors: {
+					Processor: saker.java.processor.bundle(
+						Bundle: "saker.apiextract-processor-v{ global(VERSION_saker.apiextract) }",
+						Class: saker.apiextract.processor.ApiExtractProcessor
+					),
+					Aggregating: true,
+					SuppressWarnings: [ 
+						LastRoundGeneration,
+					],
+					Options: {
+						saker.apiextract.base_packages: saker.nest,
+						saker.apiextract.warn_doc: true,
+					},
+				},
+			}
+		],
+	}
+}

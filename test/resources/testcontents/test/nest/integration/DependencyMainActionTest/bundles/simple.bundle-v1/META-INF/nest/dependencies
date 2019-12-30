@@ -1,0 +1,5 @@
+dep.bundle
+	classpath: 1
+
+some.bundle
+	non-classpath-ignored: 1

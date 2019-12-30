@@ -1,0 +1,6 @@
+export {
+	export.bundle.task()
+}
+use {
+	exported.task()
+}

@@ -1,0 +1,1224 @@
+package saker.nest;
+
+import java.io.Closeable;
+import java.io.IOException;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Map.Entry;
+import java.util.NavigableMap;
+import java.util.NavigableSet;
+import java.util.Objects;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.function.Supplier;
+import java.util.regex.Pattern;
+
+import saker.build.runtime.params.ExecutionPathConfiguration;
+import saker.build.runtime.repository.TaskNotFoundException;
+import saker.build.task.TaskFactory;
+import saker.build.task.TaskName;
+import saker.build.thirdparty.saker.util.ImmutableUtils;
+import saker.build.thirdparty.saker.util.ObjectUtils;
+import saker.build.thirdparty.saker.util.ReflectUtils;
+import saker.build.thirdparty.saker.util.StringUtils;
+import saker.build.thirdparty.saker.util.function.Functionals;
+import saker.build.thirdparty.saker.util.io.FileUtils;
+import saker.build.util.java.JavaTools;
+import saker.nest.bundle.AbstractNestRepositoryBundle;
+import saker.nest.bundle.BundleDependency;
+import saker.nest.bundle.BundleDependencyInformation;
+import saker.nest.bundle.BundleDependencyList;
+import saker.nest.bundle.BundleIdentifier;
+import saker.nest.bundle.BundleInformation;
+import saker.nest.bundle.BundleKey;
+import saker.nest.bundle.DependencyConstraintConfiguration;
+import saker.nest.bundle.NestBundleClassLoader;
+import saker.nest.bundle.NestBundleStorageConfiguration;
+import saker.nest.bundle.NestRepositoryBundle;
+import saker.nest.bundle.NestRepositoryBundleClassLoader;
+import saker.nest.bundle.SimpleBundleKey;
+import saker.nest.bundle.SimpleDependencyConstraintConfiguration;
+import saker.nest.bundle.lookup.AbstractBundleLookup;
+import saker.nest.bundle.lookup.BundleLookup;
+import saker.nest.bundle.lookup.BundleVersionLookupResult;
+import saker.nest.bundle.lookup.LookupKey;
+import saker.nest.bundle.lookup.MultiBundleLookup;
+import saker.nest.bundle.lookup.SimpleBundleLookupResult;
+import saker.nest.bundle.lookup.SimpleBundleVersionLookupResult;
+import saker.nest.bundle.lookup.SingleBundleLookup;
+import saker.nest.bundle.lookup.TaskLookupInfo;
+import saker.nest.bundle.storage.AbstractBundleStorage;
+import saker.nest.bundle.storage.AbstractBundleStorageView;
+import saker.nest.bundle.storage.AbstractStorageKey;
+import saker.nest.bundle.storage.BundleStorageView;
+import saker.nest.bundle.storage.LocalBundleStorage;
+import saker.nest.bundle.storage.LocalBundleStorageView;
+import saker.nest.bundle.storage.ParameterBundleStorage;
+import saker.nest.bundle.storage.ParameterBundleStorageView;
+import saker.nest.bundle.storage.ServerBundleStorage;
+import saker.nest.bundle.storage.ServerBundleStorageView;
+import saker.nest.bundle.storage.StorageViewKey;
+import saker.nest.dependency.DependencyResolutionLogger;
+import saker.nest.dependency.DependencyResolutionResult;
+import saker.nest.dependency.DependencyUtils;
+import saker.nest.exc.BundleDependencyUnsatisfiedException;
+import saker.nest.exc.BundleLoadingFailedException;
+import saker.nest.meta.Versions;
+import saker.nest.utils.NonSpaceIterator;
+
+public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorageConfiguration {
+	@SuppressWarnings("unchecked")
+	private static final List<?> DEFAULT_STORAGE_CONFIG = ImmutableUtils.asUnmodifiableArrayList(
+			ImmutableUtils.makeImmutableMapEntry(STORAGE_TYPE_PARAMETER, STORAGE_TYPE_PARAMETER),
+			ImmutableUtils.makeImmutableMapEntry(STORAGE_TYPE_LOCAL, STORAGE_TYPE_LOCAL),
+			ImmutableUtils.makeImmutableMapEntry(STORAGE_TYPE_SERVER, STORAGE_TYPE_SERVER));
+	private static final Map<String, String> DEFAULT_STORAGE_NAME_TYPES = new TreeMap<>();
+	static {
+		DEFAULT_STORAGE_NAME_TYPES.put(STORAGE_TYPE_PARAMETER, STORAGE_TYPE_PARAMETER);
+		DEFAULT_STORAGE_NAME_TYPES.put(STORAGE_TYPE_LOCAL, STORAGE_TYPE_LOCAL);
+		DEFAULT_STORAGE_NAME_TYPES.put(STORAGE_TYPE_SERVER, STORAGE_TYPE_SERVER);
+	}
+	private static final Set<String> STORAGE_CONFIGURATION_TYPES = DEFAULT_STORAGE_NAME_TYPES.keySet();
+
+	private static final Set<String> RESERVED_STORAGE_NAMES = ImmutableUtils
+			.makeImmutableNavigableSet(new String[] { "all", "repository" });
+
+	private static final Set<String> CLASSPATH_DEPENDENCY_KIND_SINGLETON = Collections
+			.singleton(BundleInformation.DEPENDENCY_KIND_CLASSPATH);
+
+	private static final Pattern PATTERN_SEMICOLON_SPACES_SPLIT = Pattern.compile("[; \\t]+");
+
+	private final NestRepositoryImpl repository;
+	private final AbstractBundleLookup lookupConfiguration;
+	private final Map<String, AbstractBundleLookup> storageKeyIdentifierBundleLookups = new TreeMap<>();
+	private final Map<LookupKey, BundleLookup> lookupKeyBundleLookups = new HashMap<>();
+	private final Map<BundleLookup, String> bundleLookupStorageIdentifiers = new IdentityHashMap<>();
+
+	private final transient Map<String, AbstractBundleStorageView> storageViewStringIdentifierStorages = new TreeMap<>();
+	private final transient Map<StorageViewKey, AbstractBundleStorageView> storageViewKeyStorageViews = new HashMap<>();
+
+	private final Map<TaskName, TaskName> pinnedTaskVersion = new TreeMap<>();
+
+	private volatile boolean closed = false;
+	private final Object classLoaderLock = new Object();
+	private final ConcurrentHashMap<NestRepositoryBundle, NestRepositoryBundleClassLoader> classLoaders = new ConcurrentHashMap<>();
+	private final ConcurrentHashMap<ClassLoaderDomain, NestRepositoryBundleClassLoader> domainClassLoaders = new ConcurrentHashMap<>();
+
+	private transient final ConcurrentSkipListMap<TaskName, Supplier<? extends TaskFactory<?>>> taskClasses = new ConcurrentSkipListMap<>();
+
+	private DependencyConstraintConfiguration constraintConfiguration;
+
+	private final Object detectChangeLock = new Object();
+	private DetectedChanges expectedDetectedChanges;
+
+	public ConfiguredRepositoryStorage(NestRepositoryImpl repository, String repoid,
+			ExecutionPathConfiguration pathconfig, Map<String, String> parameters) {
+		this.repository = repository;
+
+		final Integer classPathJreMajorVersion;
+		final String classPathRepositoryVersion;
+		final String classPathBuildSystemVersion;
+		final String nativeLibraryOsArchitecture;
+		{
+			String forcedmajorparamname = repoid + "." + PARAMETER_NEST_REPOSITORY_CONSTRAINT_FORCE_JRE_MAJOR;
+			String forcedmajorstr = parameters.get(forcedmajorparamname);
+			if (forcedmajorstr != null) {
+				Integer parsed;
+				if ("null".equals(forcedmajorstr) || forcedmajorstr.isEmpty()) {
+					parsed = null;
+				} else {
+					try {
+						parsed = Integer.parseInt(forcedmajorstr);
+					} catch (NumberFormatException e) {
+						throw new IllegalArgumentException("Failed to parse argument for: " + forcedmajorparamname
+								+ " : " + forcedmajorstr + " (" + repoid + ")", e);
+					}
+					//any value under 8 doesn't make sense, but currently we leave that decision to the user
+					//any value that is 0 or negative is invalid
+					//any value that is greater than the latest release doesn't make sense either
+					if (parsed < 1) {
+						throw new IllegalArgumentException(
+								"Invalid forced classpath JRE version: " + parsed + " (" + repoid + ")");
+					}
+				}
+				classPathJreMajorVersion = parsed;
+			} else {
+				classPathJreMajorVersion = JavaTools.getCurrentJavaMajorVersion();
+			}
+		}
+		{
+			String forcedrepoversionparamname = repoid + "."
+					+ PARAMETER_NEST_REPOSITORY_CONSTRAINT_FORCE_REPOSITORY_VERSION;
+			String forcedrepoversionstr = parameters.get(forcedrepoversionparamname);
+			if (forcedrepoversionstr != null) {
+				if ("null".equals(forcedrepoversionstr) || forcedrepoversionstr.isEmpty()) {
+					classPathRepositoryVersion = null;
+				} else {
+					if (!BundleIdentifier.isValidVersionNumber(forcedrepoversionstr)) {
+						throw new IllegalArgumentException(
+								"Invalid forced repository version: " + forcedrepoversionstr + " (" + repoid + ")");
+					}
+					classPathRepositoryVersion = forcedrepoversionstr;
+				}
+			} else {
+				classPathRepositoryVersion = Versions.VERSION_STRING_FULL;
+			}
+		}
+		{
+			String forcedbuildsystemversionparamname = repoid + "."
+					+ PARAMETER_NEST_REPOSITORY_CONSTRAINT_FORCE_BUILD_SYSTEM_VERSION;
+			String forcedbuildsystemversionstr = parameters.get(forcedbuildsystemversionparamname);
+			if (forcedbuildsystemversionstr != null) {
+				if ("null".equals(forcedbuildsystemversionstr) || forcedbuildsystemversionstr.isEmpty()) {
+					classPathBuildSystemVersion = null;
+				} else {
+					if (!BundleIdentifier.isValidVersionNumber(forcedbuildsystemversionstr)) {
+						throw new IllegalArgumentException("Invalid forced build system version: "
+								+ forcedbuildsystemversionstr + " (" + repoid + ")");
+					}
+					classPathBuildSystemVersion = forcedbuildsystemversionstr;
+				}
+			} else {
+				classPathBuildSystemVersion = saker.build.meta.Versions.VERSION_STRING_FULL;
+			}
+		}
+		{
+			String forcedlibosarchparamname = repoid + "."
+					+ PARAMETER_NEST_REPOSITORY_CONSTRAINT_FORCE_NATIVE_ARCHITECTURE;
+			String forcedlibosarch = parameters.get(forcedlibosarchparamname);
+			if (forcedlibosarch != null) {
+				if ("null".equals(forcedlibosarch) || forcedlibosarch.isEmpty()) {
+					nativeLibraryOsArchitecture = null;
+				} else {
+					nativeLibraryOsArchitecture = forcedlibosarch;
+				}
+			} else {
+				nativeLibraryOsArchitecture = System.getProperty("os.arch");
+			}
+		}
+
+		this.constraintConfiguration = new SimpleDependencyConstraintConfiguration(classPathJreMajorVersion,
+				classPathRepositoryVersion, classPathBuildSystemVersion, nativeLibraryOsArchitecture);
+
+		String storageconfigparamname = repoid + "." + PARAMETER_NEST_REPOSITORY_STORAGE_CONFIGURATION;
+		String storageconfigparam = parameters.get(storageconfigparamname);
+		List<?> storageconfig;
+		Map<String, String> storagenametypes;
+		if (storageconfigparam != null) {
+			storageconfig = parseStorageConfigurationUserParameter(storageconfigparam);
+			storagenametypes = getStorageConfigurationNameTypes(storageconfig);
+		} else {
+			storageconfig = DEFAULT_STORAGE_CONFIG;
+			storagenametypes = DEFAULT_STORAGE_NAME_TYPES;
+		}
+		Map<String, StorageInitializationInfo> namedstorageinitializers = new TreeMap<>();
+		for (Entry<String, String> entry : storagenametypes.entrySet()) {
+			String storagename = entry.getKey();
+			if (isReservedStorageName(storagename)) {
+				throw new IllegalArgumentException("The storage name is reserved: " + storagename);
+			}
+			String startwithcheck = repoid + "." + storagename + ".";
+			NavigableMap<String, String> storageuserparams = new TreeMap<>();
+			for (Entry<String, String> paramentry : parameters.entrySet()) {
+				if (paramentry.getKey().startsWith(startwithcheck)) {
+					storageuserparams.put(paramentry.getKey().substring(startwithcheck.length()),
+							paramentry.getValue());
+				}
+			}
+			switch (entry.getValue()) {
+				case STORAGE_TYPE_LOCAL: {
+					namedstorageinitializers.put(storagename,
+							new StorageInitializationInfo(
+									LocalBundleStorage.LocalStorageKey.create(repository, storageuserparams),
+									storageuserparams));
+					break;
+				}
+				case STORAGE_TYPE_PARAMETER: {
+					namedstorageinitializers.put(storagename,
+							new StorageInitializationInfo(
+									ParameterBundleStorage.ParameterStorageKey.create(repository, storageuserparams),
+									storageuserparams));
+					break;
+				}
+				case STORAGE_TYPE_SERVER: {
+					namedstorageinitializers.put(storagename,
+							new StorageInitializationInfo(
+									ServerBundleStorage.ServerStorageKey.create(repository, storageuserparams),
+									storageuserparams));
+					break;
+				}
+				default: {
+					throw new AssertionError("Unknown storage type: " + entry.getValue());
+				}
+			}
+		}
+		for (Entry<String, StorageInitializationInfo> entry : namedstorageinitializers.entrySet()) {
+			StorageInitializationInfo initinfo = entry.getValue();
+
+			AbstractBundleStorage storage = repository.loadStorage(initinfo.storageKey);
+			AbstractBundleStorageView storageview = storage.newStorageView(initinfo.userParameters, pathconfig);
+
+			String storageviewstringid = createStorageViewStringIdentifier(storageview);
+
+			initinfo.storageView = storageview;
+			initinfo.storageViewStringIdentifier = storageviewstringid;
+
+			storageViewStringIdentifierStorages.put(storageviewstringid, storageview);
+			storageViewKeyStorageViews.put(storageview.getStorageViewKey(), storageview);
+		}
+
+		this.lookupConfiguration = createBundleLookupForConfiguration(storageconfig, namedstorageinitializers);
+		for (Entry<String, AbstractBundleLookup> entry : storageKeyIdentifierBundleLookups.entrySet()) {
+			AbstractBundleLookup lookup = entry.getValue();
+			bundleLookupStorageIdentifiers.put(lookup, entry.getKey());
+			lookupKeyBundleLookups.put(lookup.getLookupKey(), lookup);
+		}
+		lookupKeyBundleLookups.put(this.lookupConfiguration.getLookupKey(), this.lookupConfiguration);
+
+		String pintaskversionsparamname = repoid + "." + PARAMETER_NEST_REPOSITORY_PIN_TASK_VERSION;
+		String pintaskversionsparam = parameters.get(pintaskversionsparamname);
+		if (!ObjectUtils.isNullOrEmpty(pintaskversionsparam)) {
+			for (String taskpin : PATTERN_SEMICOLON_SPACES_SPLIT.split(pintaskversionsparam)) {
+				if (ObjectUtils.isNullOrEmpty(taskpin)) {
+					continue;
+				}
+				int colonidx = taskpin.indexOf(':');
+				if (colonidx < 0) {
+					throw new IllegalArgumentException("Task version pin parameter: " + taskpin
+							+ " has invalid format. Expected format: <task-name>:<version-num>");
+				}
+				String vernum = taskpin.substring(colonidx + 1).trim();
+				if (!BundleIdentifier.isValidVersionNumber(vernum)) {
+					throw new IllegalArgumentException("Task version pin parameter: " + taskpin
+							+ " has invalid version number. Expected format: <task-name>:<version-num>");
+				}
+				TaskName tn;
+				try {
+					tn = TaskName.valueOf(taskpin.substring(0, colonidx).trim());
+				} catch (IllegalArgumentException e) {
+					throw new IllegalArgumentException("Task version pin parameter: " + taskpin
+							+ " has invalid task name. Expected format: <task-name>:<version-num>", e);
+				}
+				if (BundleIdentifier.hasVersionQualifier(tn.getTaskQualifiers())) {
+					throw new IllegalArgumentException("Task version pin parameter: " + taskpin
+							+ " must not contain version qualifiers for the task name. Expected format: <task-name>:<version-num>");
+				}
+				TreeSet<String> nqualifiers = new TreeSet<>(tn.getTaskQualifiers());
+				nqualifiers.add(BundleIdentifier.makeVersionQualifier(vernum));
+				TaskName pinnedtn = TaskName.valueOf(tn.getName(), nqualifiers);
+				TaskName prev = pinnedTaskVersion.putIfAbsent(tn, pinnedtn);
+				if (prev != null && !prev.equals(pinnedtn)) {
+					throw new IllegalArgumentException("Multiple pinned task versions: " + prev + " and " + pinnedtn);
+				}
+			}
+		}
+	}
+
+	private static String createStorageViewStringIdentifier(AbstractBundleStorageView storageview)
+			throws AssertionError {
+		MessageDigest infodigest;
+		try {
+			infodigest = MessageDigest.getInstance("MD5");
+		} catch (NoSuchAlgorithmException e) {
+			throw new AssertionError("JVM doesn't support MD5 hash.", e);
+		}
+		storageview.updateStorageViewHash(infodigest);
+		return StringUtils.toHexString(infodigest.digest());
+	}
+
+	private static boolean isReservedStorageName(String storagename) {
+		return RESERVED_STORAGE_NAMES.contains(storagename);
+	}
+
+	public NavigableSet<TaskName> getPresentTaskNamesForInformationProvider() {
+		return lookupConfiguration.getPresentTaskNamesForInformationProvider();
+	}
+
+	public NavigableSet<BundleIdentifier> getPresentBundlesForInformationProvider() {
+		return lookupConfiguration.getPresentBundlesForInformationProvider();
+	}
+
+	@Override
+	public DependencyConstraintConfiguration getDependencyConstraintConfiguration() {
+		return constraintConfiguration;
+	}
+
+	@Override
+	public NestRepositoryImpl getRepository() {
+		return repository;
+	}
+
+	public AbstractBundleLookup getLookupConfiguration() {
+		return lookupConfiguration;
+	}
+
+	public String getStorageIdentifier(NestBundleClassLoader nestbundlecl) {
+		return bundleLookupStorageIdentifiers.get(nestbundlecl.getRelativeBundleLookup());
+	}
+
+	public NestRepositoryBundleClassLoader getBundleClassLoaderForStorageIdentifier(String storageidentifier,
+			BundleIdentifier bundleid) throws BundleLoadingFailedException {
+		AbstractBundleStorageView storage = storageViewStringIdentifierStorages.get(storageidentifier);
+		if (storage == null) {
+			return null;
+		}
+		AbstractNestRepositoryBundle bundle = storage.getBundle(bundleid);
+		AbstractBundleLookup relativelookup = storageKeyIdentifierBundleLookups.get(storageidentifier);
+		try {
+			return getBundleClassLoader(bundle, relativelookup, storage);
+		} catch (BundleDependencyUnsatisfiedException e) {
+			return null;
+		}
+	}
+
+	public NestRepositoryBundleClassLoader getBundleClassLoader(BundleIdentifier bundleid)
+			throws BundleLoadingFailedException {
+		return getBundleClassLoader(lookupConfiguration.lookupBundle(bundleid));
+	}
+
+	private NestRepositoryBundleClassLoader getBundleClassLoader(SimpleBundleLookupResult bundlelookup) {
+		return getBundleClassLoader((AbstractNestRepositoryBundle) bundlelookup.getBundle(),
+				bundlelookup.getRelativeLookup(), bundlelookup.getStorageView());
+	}
+
+	public Class<?> getTaskClass(TaskName tn) throws TaskNotFoundException {
+		TaskLookupInfo tasklookupinfo = lookupConfiguration.lookupTaskBundle(tn);
+		String taskclassname = tasklookupinfo.getTaskClassName();
+		try {
+			NestRepositoryBundleClassLoader bundlecl = getBundleClassLoader(tasklookupinfo);
+			return bundlecl.loadClassFromBundle(taskclassname);
+		} catch (ClassNotFoundException | BundleDependencyUnsatisfiedException e) {
+			throw new TaskNotFoundException("Task class not found " + taskclassname + " in bundle "
+					+ tasklookupinfo.getBundle().getBundleIdentifier(), e, tn);
+		}
+	}
+
+	public Class<?> getTaskClassForInformationProvider(TaskName tn) {
+		TaskLookupInfo tasklookupinfo = lookupConfiguration.lookupTaskBundleForInformationProvider(tn);
+		if (tasklookupinfo == null) {
+			return null;
+		}
+		String taskclassname = tasklookupinfo.getTaskClassName();
+		try {
+			NestRepositoryBundleClassLoader bundlecl = getBundleClassLoader(tasklookupinfo);
+			return bundlecl.loadClassFromBundle(taskclassname);
+		} catch (ClassNotFoundException | BundleDependencyUnsatisfiedException e) {
+			throw new TaskNotFoundException("Task class not found " + taskclassname + " in bundle "
+					+ tasklookupinfo.getBundle().getBundleIdentifier(), e, tn);
+		}
+	}
+
+	@Override
+	public BundleLookup getBundleLookup() {
+		return lookupConfiguration;
+	}
+
+	@Override
+	public BundleLookup getBundleLookupForKey(LookupKey key) {
+		if (key == null) {
+			return null;
+		}
+		return lookupKeyBundleLookups.get(key);
+	}
+
+	@Override
+	public BundleStorageView getBundleStorageViewForKey(StorageViewKey key) {
+		if (key == null) {
+			return null;
+		}
+		return storageViewKeyStorageViews.get(key);
+	}
+
+	@Override
+	public Map<String, ? extends LocalBundleStorageView> getLocalStorages() {
+		return lookupConfiguration.getLocalStorages();
+	}
+
+	@Override
+	public Map<String, ? extends ParameterBundleStorageView> getParameterStorages() {
+		return lookupConfiguration.getParameterStorages();
+	}
+
+	@Override
+	public Map<String, ? extends ServerBundleStorageView> getServerStorages() {
+		return lookupConfiguration.getServerStorages();
+	}
+
+	@Override
+	public Map<String, ? extends BundleStorageView> getStorages() {
+		return lookupConfiguration.getStorages();
+	}
+
+	@Override
+	public ClassLoader getBundleClassLoader(BundleLookup lookup, BundleIdentifier bundleid)
+			throws NullPointerException, BundleLoadingFailedException {
+		if (lookup == null) {
+			lookup = this.lookupConfiguration;
+		}
+		Objects.requireNonNull(bundleid, "bundle identifier");
+		return getBundleClassLoader(((AbstractBundleLookup) lookup).lookupBundle(bundleid));
+	}
+
+	public ClassLoader getBundleClassLoader(BundleKey bundlekey)
+			throws NullPointerException, BundleLoadingFailedException, BundleDependencyUnsatisfiedException {
+		Objects.requireNonNull(bundlekey, "bundle key");
+		StorageViewKey storageviewkey = bundlekey.getStorageViewKey();
+		BundleLookup lookup = this.lookupConfiguration.findStorageViewBundleLookup(storageviewkey);
+		if (lookup == null) {
+			throw new BundleLoadingFailedException("Failed to determine bundle lookup for storage view key: "
+					+ storageviewkey + " with bundle identifier: " + bundlekey.getBundleIdentifier());
+		}
+		return getBundleClassLoader(lookup, bundlekey.getBundleIdentifier());
+	}
+
+	@Override
+	public void close() throws IOException {
+		// XXX release storages if it was allocated only for this configuration
+		closed = true;
+		synchronized (classLoaderLock) {
+			classLoaders.clear();
+			domainClassLoaders.clear();
+		}
+	}
+
+	public Object detectChanges(ExecutionPathConfiguration pathconfig) {
+		synchronized (detectChangeLock) {
+			if (this.expectedDetectedChanges != null) {
+				throw new IllegalStateException("Multiple detect changes call without handling it.");
+			}
+			Map<AbstractBundleStorageView, Object> detectedchanges = new LinkedHashMap<>();
+			for (AbstractBundleStorageView storage : storageViewStringIdentifierStorages.values()) {
+				Object detected = storage.detectChanges(pathconfig);
+				if (detected != null) {
+					detectedchanges.put(storage, detected);
+				}
+			}
+			DetectedChanges result = detectedchanges.isEmpty() ? null : new DetectedChanges(detectedchanges);
+			expectedDetectedChanges = result;
+			return result;
+		}
+	}
+
+	public void handleChanges(ExecutionPathConfiguration pathconfig, Object detectedchangesobj) {
+		synchronized (detectChangeLock) {
+			if (this.expectedDetectedChanges != detectedchangesobj) {
+				throw new IllegalArgumentException("Detected changes object is not expected.");
+			}
+			this.expectedDetectedChanges = null;
+
+			DetectedChanges detectedchanges = (DetectedChanges) detectedchangesobj;
+			synchronized (classLoaderLock) {
+				//XXX do not clear all, but only modifieds
+				taskClasses.clear();
+				classLoaders.clear();
+				domainClassLoaders.clear();
+
+				for (Entry<AbstractBundleStorageView, Object> entry : detectedchanges.detectedChanges.entrySet()) {
+					entry.getKey().handleChanges(pathconfig, entry.getValue());
+				}
+				//reset the storage view key map as they can be modified in case of changes
+				Map<String, AbstractBundleStorageView> nstorageviewstringidstorages = new TreeMap<>();
+				Map<StorageViewKey, AbstractBundleStorageView> nstoragekeybundlestorageviews = new HashMap<>();
+				for (AbstractBundleStorageView storageview : storageViewKeyStorageViews.values()) {
+					nstoragekeybundlestorageviews.put(storageview.getStorageViewKey(), storageview);
+					String nstorageviewstringid = createStorageViewStringIdentifier(storageview);
+					nstorageviewstringidstorages.put(nstorageviewstringid, storageview);
+				}
+				storageViewKeyStorageViews.clear();
+				storageViewKeyStorageViews.putAll(nstoragekeybundlestorageviews);
+				storageViewStringIdentifierStorages.clear();
+				storageViewStringIdentifierStorages.putAll(nstorageviewstringidstorages);
+
+			}
+		}
+	}
+
+	@Override
+	@SuppressWarnings("unchecked")
+	public TaskFactory<?> lookupTask(TaskName taskname) throws TaskNotFoundException {
+		if (!BundleIdentifier.hasVersionQualifier(taskname.getTaskQualifiers())) {
+			taskname = pinnedTaskVersion.getOrDefault(taskname, taskname);
+		}
+		return taskClasses.computeIfAbsent(taskname, tn -> {
+			Class<?> taskclass;
+			try {
+				taskclass = this.getTaskClass(tn);
+			} catch (TaskNotFoundException e) {
+				return () -> {
+					throw new TaskNotFoundException(e, tn);
+				};
+			}
+			try {
+				Method providermethod = taskclass.getMethod("provider");
+				if (Modifier.isStatic(providermethod.getModifiers())
+						&& TaskFactory.class.isAssignableFrom(providermethod.getReturnType())) {
+					return () -> {
+						try {
+							return (TaskFactory<?>) ReflectUtils.invokeMethod(null, providermethod);
+						} catch (IllegalAccessException | IllegalArgumentException | InvocationTargetException
+								| SecurityException | ClassCastException e) {
+							throw new TaskNotFoundException("Failed to instantiate task.", e, tn);
+						}
+					};
+				}
+			} catch (NoSuchMethodException e) {
+			}
+			if (!TaskFactory.class.isAssignableFrom(taskclass)) {
+				return () -> {
+					throw new TaskNotFoundException(
+							"Class associated with task is not assignable to TaskFactory. Valid \"provider\" static method was not found.",
+							tn);
+				};
+			}
+			Constructor<? extends TaskFactory<?>> constructor;
+			try {
+				constructor = (Constructor<? extends TaskFactory<?>>) taskclass.getConstructor();
+			} catch (NoSuchMethodException | SecurityException e) {
+				return () -> {
+					throw new TaskNotFoundException("Task class no-arg constructor not found: " + taskclass.getName(),
+							e, tn);
+				};
+			}
+			return () -> {
+				try {
+					return ReflectUtils.invokeConstructor(constructor);
+				} catch (InstantiationException | IllegalAccessException | IllegalArgumentException
+						| InvocationTargetException | SecurityException | ClassCastException e2) {
+					throw new TaskNotFoundException("Failed to instantiate task.", e2, tn);
+				}
+			};
+		}).get();
+	}
+
+	public static String getSubDirectoryNameForServerStorage(String serverhost) {
+		return StringUtils.toHexString(FileUtils.hashString(serverhost));
+	}
+
+	public static List<?> parseStorageConfigurationUserParameter(String s) {
+		NonSpaceIterator it = new NonSpaceIterator(s);
+		if (!it.hasNext()) {
+			return Collections.emptyList();
+		}
+		Object result = readStorageConfigurations(it);
+		if (it.hasNext()) {
+			throw new IllegalArgumentException("Extra characters in storage configuration at index: " + it.getIndex()
+					+ " in " + it.getCharSequence());
+		}
+		if (result instanceof List) {
+			return (List<?>) result;
+		}
+		return ImmutableUtils.singletonList(result);
+	}
+
+	private static Object readStorageConfigurations(NonSpaceIterator it) {
+		char fc = it.peek();
+		if (fc == '[') {
+			it.move();
+			//a list
+			List<Object> result = new ArrayList<>();
+			while (it.hasNext()) {
+				char nc = it.peek();
+				if (nc == ']') {
+					break;
+				}
+				Object subsconfig = readStorageConfigurations(it);
+				if (subsconfig instanceof List) {
+					if (!((List<?>) subsconfig).isEmpty()) {
+						result.add(subsconfig);
+					}
+				} else {
+					result.add(subsconfig);
+				}
+				if (it.hasNext() && it.peek() == ',') {
+					it.move();
+					if (!it.hasNext() || it.peek() == ']') {
+						throw new IllegalArgumentException("Missing storage configuration at index: " + it.getIndex()
+								+ " in " + it.getCharSequence());
+					}
+					continue;
+				}
+			}
+			if (!it.hasNext() || it.peek() != ']') {
+				throw new IllegalArgumentException("Missing storage configuration closing character ']' at index: "
+						+ it.getIndex() + " in " + it.getCharSequence());
+			}
+			it.move();
+			return result;
+		}
+		if (isValidStorageConfigurationNameCharacter(fc)) {
+			StringBuilder sb = new StringBuilder();
+			sb.append(fc);
+			it.move();
+			while (it.hasNext()) {
+				char c = it.peek();
+				if (c == ':') {
+					//got the name
+					it.move();
+					break;
+				}
+				if (!isValidStorageConfigurationNameCharacter(c)) {
+					throw new IllegalArgumentException("Invalid storage configuration name character at index: "
+							+ it.getIndex() + " in " + it.getCharSequence());
+				}
+				sb.append(c);
+				it.move();
+			}
+			String name = sb.toString();
+			sb.setLength(0);
+			while (it.hasNext()) {
+				char c = it.peek();
+				if (c >= 'A' && c <= 'Z') {
+					//to lower case
+					c = (char) (c - 'A' + 'a');
+				}
+				if (c == ',' || c == ']') {
+					break;
+				}
+				if (c < 'a' || c > 'z') {
+					throw new IllegalArgumentException("Invalid storage type character at index: " + it.getIndex()
+							+ " in " + it.getCharSequence());
+				}
+				it.move();
+				sb.append(c);
+			}
+			String type = sb.toString();
+			if (type.isEmpty()) {
+				type = null;
+			} else {
+				if (!STORAGE_CONFIGURATION_TYPES.contains(type)) {
+					throw new IllegalArgumentException("Invalid storage configuration type: " + type + " at index: "
+							+ it.getIndex() + " in " + it.getCharSequence());
+				}
+			}
+			return ImmutableUtils.makeImmutableMapEntry(name, type);
+		}
+		if (fc == ':') {
+			//starting directly with ':'
+			StringBuilder sb = new StringBuilder();
+			it.move();
+			while (it.hasNext()) {
+				char c = it.peek();
+				if (c >= 'A' && c <= 'Z') {
+					//to lower case
+					c = (char) (c - 'A' + 'a');
+				}
+				if (c == ',' || c == ']') {
+					break;
+				}
+				if ((c < 'a' || c > 'z') && c != '_') {
+					throw new IllegalArgumentException("Invalid storage type character at index: " + it.getIndex()
+							+ " in " + it.getCharSequence());
+				}
+				it.move();
+				sb.append(c);
+			}
+			String type = sb.toString();
+			if (!STORAGE_CONFIGURATION_TYPES.contains(type)) {
+				throw new IllegalArgumentException("Invalid storage configuration type: " + type + " at index: "
+						+ it.getIndex() + " in " + it.getCharSequence());
+			}
+			return ImmutableUtils.makeImmutableMapEntry(type, type);
+		}
+		throw new IllegalArgumentException("Invalid storage configuration name character at index: " + it.getIndex()
+				+ " in " + it.getCharSequence());
+	}
+
+	private static boolean isValidStorageConfigurationNameCharacter(char fc) {
+		return (fc >= 'a' && fc <= 'z') || (fc >= 'A' && fc <= 'Z') || (fc >= '0' && fc <= '9') || fc == '_';
+	}
+
+	private static void getStorageConfigurationNameTypesImpl(List<?> storageconfig, Map<String, String> result) {
+		for (Object c : storageconfig) {
+			if (c instanceof List<?>) {
+				getStorageConfigurationNameTypesImpl((List<?>) c, result);
+				continue;
+			}
+			@SuppressWarnings("unchecked")
+			Map.Entry<String, String> entry = (Entry<String, String>) c;
+			String confname = entry.getKey();
+			String conftype = entry.getValue();
+			if (conftype == null) {
+				//just put to be present
+				result.putIfAbsent(confname, null);
+			} else {
+				String prev = result.put(confname, conftype);
+				if (prev != null && !prev.equals(conftype)) {
+					throw new IllegalArgumentException("Different types defined for storage configuration named: "
+							+ confname + " with " + conftype + " and " + prev);
+				}
+			}
+		}
+	}
+
+	private static Map<String, String> getStorageConfigurationNameTypes(List<?> storageconfig) {
+		Map<String, String> result = new TreeMap<>();
+		getStorageConfigurationNameTypesImpl(storageconfig, result);
+		for (Entry<String, String> entry : result.entrySet()) {
+			String storagename = entry.getKey();
+			if (RESERVED_STORAGE_NAMES.contains(storagename)) {
+				throw new IllegalArgumentException(
+						"Invalid storage configuration name: " + storagename + " (reserved)");
+			}
+			if (entry.getValue() == null) {
+				throw new IllegalArgumentException("Storage type is undefined for name: " + entry.getKey());
+			}
+		}
+		return result;
+	}
+
+	private AbstractBundleLookup createBundleLookupForConfiguration(List<?> storageconfig,
+			Map<String, StorageInitializationInfo> namedstorageinitializers) {
+		Map<String, Collection<MultiBundleLookup>> conflicts = new TreeMap<>();
+		AbstractBundleLookup result = createBundleLookupForConfigurationImpl(storageconfig, namedstorageinitializers,
+				conflicts);
+		for (Entry<String, Collection<MultiBundleLookup>> entry : conflicts.entrySet()) {
+			Iterator<MultiBundleLookup> it = entry.getValue().iterator();
+			MultiBundleLookup first = it.next();
+			while (it.hasNext()) {
+				MultiBundleLookup l = it.next();
+				if (!first.equals(l)) {
+					throw new IllegalArgumentException(
+							"Different tail resolution configuration for recurring storage configuration: "
+									+ entry.getKey());
+				}
+			}
+		}
+		return result;
+	}
+
+	private AbstractBundleLookup createBundleLookupForConfigurationImpl(List<?> storageconfig,
+			Map<String, StorageInitializationInfo> namedstorageinitializers,
+			Map<String, Collection<MultiBundleLookup>> conflictinglookups) {
+		AbstractBundleLookup[] lookups = new AbstractBundleLookup[storageconfig.size()];
+		int i = 0;
+		for (Object c : storageconfig) {
+			if (c instanceof List<?>) {
+				AbstractBundleLookup sub = createBundleLookupForConfigurationImpl((List<?>) c, namedstorageinitializers,
+						conflictinglookups);
+				lookups[i++] = sub;
+				continue;
+			}
+			@SuppressWarnings("unchecked")
+			Map.Entry<String, String> entry = (Entry<String, String>) c;
+			String confname = entry.getKey();
+			MultiBundleLookup enclosinglookup = new MultiBundleLookup(
+					ImmutableUtils.unmodifiableArrayList(lookups, i, lookups.length));
+			StorageInitializationInfo namedstorage = namedstorageinitializers.get(confname);
+			SingleBundleLookup sub = new SingleBundleLookup(confname, namedstorage.storageView, enclosinglookup);
+
+			conflictinglookups.computeIfAbsent(confname, Functionals.arrayListComputer()).add(enclosinglookup);
+
+			storageKeyIdentifierBundleLookups.put(namedstorage.storageViewStringIdentifier, enclosinglookup);
+			lookups[i++] = sub;
+		}
+		return new MultiBundleLookup(ImmutableUtils.unmodifiableArrayList(lookups));
+	}
+
+	private NestRepositoryBundleClassLoader getBundleClassLoader(TaskLookupInfo tasklookup) {
+		return getBundleClassLoader((AbstractNestRepositoryBundle) tasklookup.getBundle(),
+				tasklookup.getLookupConfiguration(), tasklookup.getStorageView());
+	}
+
+	private static class ClassLoaderDependencyResolutionBundleContext {
+		private BundleStorageView storageView;
+		private BundleLookup relativeLookup;
+
+		public ClassLoaderDependencyResolutionBundleContext(BundleVersionLookupResult lookupresult) {
+			this.storageView = lookupresult.getStorageView();
+			this.relativeLookup = lookupresult.getRelativeLookup();
+		}
+
+		public BundleStorageView getStorageView() {
+			return storageView;
+		}
+
+		public BundleLookup getRelativeLookup() {
+			return relativeLookup;
+		}
+
+		@Override
+		public int hashCode() {
+			final int prime = 31;
+			int result = 1;
+			result = prime * result + ((relativeLookup == null) ? 0 : relativeLookup.hashCode());
+			result = prime * result + ((storageView == null) ? 0 : storageView.hashCode());
+			return result;
+		}
+
+		@Override
+		public boolean equals(Object obj) {
+			if (this == obj)
+				return true;
+			if (obj == null)
+				return false;
+			if (getClass() != obj.getClass())
+				return false;
+			ClassLoaderDependencyResolutionBundleContext other = (ClassLoaderDependencyResolutionBundleContext) obj;
+			if (relativeLookup == null) {
+				if (other.relativeLookup != null)
+					return false;
+			} else if (!relativeLookup.equals(other.relativeLookup))
+				return false;
+			if (storageView == null) {
+				if (other.storageView != null)
+					return false;
+			} else if (!storageView.equals(other.storageView))
+				return false;
+			return true;
+		}
+	}
+
+	private NestRepositoryBundleClassLoader getBundleClassLoader(AbstractNestRepositoryBundle bundle,
+			AbstractBundleLookup bundlelookupconfig, BundleStorageView bundlestorage) {
+		NestRepositoryBundleClassLoader presentcl = classLoaders.get(bundle);
+		if (presentcl != null) {
+			return presentcl;
+		}
+		BundleIdentifier bundleid = bundle.getBundleIdentifier();
+		BundleKey bundlekey = new SimpleBundleKey(bundleid, bundlestorage.getStorageViewKey());
+		BundleInformation bundleinfo = bundle.getInformation();
+		DependencyConstraintConfiguration constraints = getDependencyConstraintConfiguration();
+		if (!DependencyUtils.supportsClassPathJreVersion(bundleinfo, constraints.getJreMajorVersion())) {
+			throw new BundleDependencyUnsatisfiedException(
+					"Bundle doesn't support JRE version: " + constraints.getJreMajorVersion() + " for range: "
+							+ bundleinfo.getSupportedClassPathJreVersionRange());
+		}
+		if (!DependencyUtils.supportsClassPathRepositoryVersion(bundleinfo, constraints.getRepositoryVersion())) {
+			throw new BundleDependencyUnsatisfiedException(
+					"Bundle doesn't support repository version: " + constraints.getRepositoryVersion() + " for range: "
+							+ bundleinfo.getSupportedClassPathRepositoryVersionRange());
+		}
+		if (!DependencyUtils.supportsClassPathBuildSystemVersion(bundleinfo, constraints.getBuildSystemVersion())) {
+			throw new BundleDependencyUnsatisfiedException(
+					"Bundle doesn't support build system version: " + constraints.getBuildSystemVersion()
+							+ " for range: " + bundleinfo.getSupportedClassPathBuildSystemVersionRange());
+		}
+		if (!DependencyUtils.supportsClassPathArchitecture(bundleinfo, constraints.getNativeArchitecture())) {
+			throw new BundleDependencyUnsatisfiedException("Bundle doesn't support architecture: "
+					+ constraints.getNativeArchitecture() + " for architectures: "
+					+ StringUtils.toStringJoin(", ", bundleinfo.getSupportedClassPathArchitectures()));
+		}
+		BundleVersionLookupResult baseversionlookupinfo = new SimpleBundleVersionLookupResult(
+				Collections.singleton(bundleid), bundlestorage, bundlelookupconfig);
+		BundleDependencyInformation basefiltereddepinfo = filterDependencyInformationForClassPath(
+				bundleinfo.getDependencyInformation(), CLASSPATH_DEPENDENCY_KIND_SINGLETON);
+		DependencyResolutionLogger<ClassLoaderDependencyResolutionBundleContext> logger = null;
+		DependencyResolutionResult<BundleKey, ClassLoaderDependencyResolutionBundleContext> satisfied = DependencyUtils
+				.satisfyDependencyRequirements(bundlekey,
+						new ClassLoaderDependencyResolutionBundleContext(baseversionlookupinfo), basefiltereddepinfo,
+						(bi, bc) -> {
+							BundleVersionLookupResult lookedupversions = bc.getRelativeLookup()
+									.lookupBundleVersions(bi);
+							if (lookedupversions == null) {
+								return null;
+							}
+							return ObjectUtils
+									.singleValueMap(toBundleKeySet(lookedupversions),
+											new ClassLoaderDependencyResolutionBundleContext(lookedupversions))
+									.entrySet();
+						}, (bi, bc) -> {
+							try {
+								BundleInformation lookupbundleinfo = bc.getStorageView()
+										.getBundleInformation(bi.getBundleIdentifier());
+								if (DependencyUtils.isDependencyConstraintClassPathExcludes(constraints,
+										lookupbundleinfo)) {
+									//XXX log somewhere?
+									return null;
+								}
+								BundleDependencyInformation lookupbundledepinfo = lookupbundleinfo
+										.getDependencyInformation();
+								return filterDependencyInformationForClassPath(lookupbundledepinfo,
+										CLASSPATH_DEPENDENCY_KIND_SINGLETON);
+							} catch (BundleLoadingFailedException e) {
+								System.err.println("Failed to load bundle: " + bi + " (" + e + ")");
+							}
+							return null;
+						}, logger);
+		if (satisfied == null) {
+			//XXX handle dependency satisfaction failure better
+			throw new BundleDependencyUnsatisfiedException("Failed to satisfy dependencies for: " + bundleid);
+		}
+		synchronized (classLoaderLock) {
+			if (closed) {
+				throw new IllegalStateException("closed");
+			}
+			presentcl = classLoaders.get(bundle);
+			if (presentcl != null) {
+				return presentcl;
+			}
+
+			NestRepositoryBundleClassLoader result = null;
+
+			Map<ClassLoaderDomain, NestRepositoryBundleClassLoader> constructeddomaincls = new HashMap<>();
+			Map<BundleKey, Map<BundleKey, NestRepositoryBundleClassLoader>> constructedcldependencies = new HashMap<>();
+			Map<BundleKey, ClassLoaderDomain> fulldomains = new HashMap<>();
+
+			Map<Entry<? extends BundleKey, ? extends ClassLoaderDependencyResolutionBundleContext>, ? extends Map<? extends BundleKey, ? extends ClassLoaderDependencyResolutionBundleContext>> domainresults = satisfied
+					.getDependencyDomainResult();
+
+			for (Entry<Entry<? extends BundleKey, ? extends ClassLoaderDependencyResolutionBundleContext>, ? extends Map<? extends BundleKey, ? extends ClassLoaderDependencyResolutionBundleContext>> domainentry : domainresults
+					.entrySet()) {
+				Entry<? extends BundleKey, ? extends ClassLoaderDependencyResolutionBundleContext> domainbundleid = domainentry
+						.getKey();
+
+				BundleKey domainbundlekey = domainbundleid.getKey();
+				ClassLoaderDependencyResolutionBundleContext domainbundlelookupinfo = domainbundleid.getValue();
+				AbstractBundleStorageView domainbundlestorage = (AbstractBundleStorageView) domainbundlelookupinfo
+						.getStorageView();
+
+				Map<? extends BundleKey, ? extends ClassLoaderDependencyResolutionBundleContext> domaindependencies = domainentry
+						.getValue();
+				Set<BundleKey> fulldomaindeps = collectFullDomainDependencies(domainbundleid.getKey(),
+						domaindependencies.entrySet(), domainresults);
+				ClassLoaderDomain cldomain = new ClassLoaderDomain(domainbundlekey, fulldomaindeps);
+				NestRepositoryBundleClassLoader domainpresentcl = domainClassLoaders.get(cldomain);
+				fulldomains.put(domainbundlekey, cldomain);
+				if (domainpresentcl != null) {
+					if (domainbundlekey.equals(bundlekey)) {
+						result = domainpresentcl;
+					}
+					continue;
+				}
+
+				Map<BundleKey, NestRepositoryBundleClassLoader> domainclassloaders = new LinkedHashMap<>();
+				domainclassloaders.putAll(ObjectUtils.singleValueMap(domaindependencies.keySet(), null));
+				constructedcldependencies.put(domainbundlekey, domainclassloaders);
+				try {
+					AbstractNestRepositoryBundle lookedupbundle = domainbundlestorage
+							.getBundle(domainbundleid.getKey().getBundleIdentifier());
+					NestRepositoryBundleClassLoader createdcl = new NestRepositoryBundleClassLoader(this,
+							domainbundleid.getKey(), lookedupbundle, domainclassloaders,
+							domainbundlelookupinfo.getRelativeLookup());
+					if (domainbundlekey.equals(bundlekey)) {
+						result = createdcl;
+					}
+					constructeddomaincls.put(cldomain, createdcl);
+				} catch (BundleLoadingFailedException e) {
+					throw new UnsupportedOperationException(e);
+				}
+			}
+
+			for (Entry<BundleKey, Map<BundleKey, NestRepositoryBundleClassLoader>> entry : constructedcldependencies
+					.entrySet()) {
+				Map<BundleKey, NestRepositoryBundleClassLoader> dependencyclassloaders = entry.getValue();
+				for (Entry<BundleKey, NestRepositoryBundleClassLoader> depentry : dependencyclassloaders.entrySet()) {
+					BundleKey depbundlekey = depentry.getKey();
+					ClassLoaderDomain cldomain = fulldomains.get(depbundlekey);
+					NestRepositoryBundleClassLoader cl = domainClassLoaders.get(cldomain);
+					if (cl == null) {
+						cl = constructeddomaincls.get(cldomain);
+						if (cl == null) {
+							throw new AssertionError(
+									"Failed to retrieve constructed classloader. " + depbundlekey + " for " + bundleid);
+						}
+					}
+					depentry.setValue(cl);
+				}
+			}
+
+			domainClassLoaders.putAll(constructeddomaincls);
+
+			if (result == null) {
+				throw new AssertionError("Failed to retrieve classloader. " + bundleid);
+			}
+			classLoaders.putIfAbsent(bundle, result);
+			return result;
+		}
+	}
+
+	private static Set<BundleIdentifier> toBundleIdentifierSet(Iterable<? extends BundleKey> bundlekeys) {
+		Set<BundleIdentifier> result = new LinkedHashSet<>();
+		for (BundleKey key : bundlekeys) {
+			result.add(key.getBundleIdentifier());
+		}
+		return result;
+	}
+
+	private static Set<BundleKey> toBundleKeySet(BundleVersionLookupResult lookedupversions) {
+		//keep order, version descending
+		Set<BundleKey> result = new LinkedHashSet<>();
+		StorageViewKey storagekey = lookedupversions.getStorageView().getStorageViewKey();
+		for (BundleIdentifier bid : lookedupversions.getBundles()) {
+			result.add(new SimpleBundleKey(bid, storagekey));
+		}
+		return result;
+	}
+
+	private static NavigableMap<BundleIdentifier, BundleKey> toBundleKeyMap(
+			Map<? extends BundleKey, ? extends ClassLoaderDependencyResolutionBundleContext> domaindependencies) {
+		NavigableMap<BundleIdentifier, BundleKey> result = new TreeMap<>();
+		for (Entry<? extends BundleKey, ? extends ClassLoaderDependencyResolutionBundleContext> entry : domaindependencies
+				.entrySet()) {
+			BundleIdentifier bundleid = entry.getKey().getBundleIdentifier();
+			result.put(bundleid, new SimpleBundleKey(bundleid, entry.getValue().getStorageView().getStorageViewKey()));
+		}
+		return result;
+	}
+
+	private BundleDependencyList filterDependencyInformationForClassPath(BundleDependencyList deplist,
+			Set<String> lookupkinds) {
+		DependencyConstraintConfiguration constraints = getDependencyConstraintConfiguration();
+		return deplist.filter(dep -> {
+			if (DependencyUtils.isDependencyConstraintExcludes(constraints, dep)) {
+				return null;
+			}
+			Set<String> depkinds = dep.getKinds();
+			if (ObjectUtils.containsAny(depkinds, lookupkinds)) {
+				BundleDependency.Builder b = BundleDependency.builder(dep);
+				b.clearKinds();
+				for (String kind : lookupkinds) {
+					if (depkinds.contains(kind)) {
+						b.addKind(kind);
+					}
+				}
+				return b.build();
+			}
+			return null;
+		});
+	}
+
+	private BundleDependencyInformation filterDependencyInformationForClassPath(BundleDependencyInformation depinfo,
+			Set<String> lookupkinds) {
+		Map<BundleIdentifier, BundleDependencyList> resultdeps = new LinkedHashMap<>();
+		for (Entry<BundleIdentifier, ? extends BundleDependencyList> entry : depinfo.getDependencies().entrySet()) {
+			BundleDependencyList deplist = entry.getValue();
+			if (!deplist.isEmpty()) {
+				BundleDependencyList ndeplist = filterDependencyInformationForClassPath(deplist, lookupkinds);
+				if (ndeplist != null) {
+					resultdeps.put(entry.getKey(), ndeplist);
+				}
+			}
+		}
+		return BundleDependencyInformation.create(resultdeps);
+	}
+
+	//XXX use a cache map for quicker lookup of already computed full domains?
+	private static <BC> Set<BundleKey> collectFullDomainDependencies(BundleKey domainbundleid,
+			Set<? extends Entry<? extends BundleKey, ? extends BC>> dependencies,
+			Map<Entry<? extends BundleKey, ? extends BC>, ? extends Map<? extends BundleKey, ? extends BC>> domainresults) {
+		Set<BundleKey> result = new HashSet<>();
+		result.add(domainbundleid);
+		collectFullDomainDependenciesImpl(dependencies, domainresults, result);
+		return result;
+	}
+
+	private static <BC> void collectFullDomainDependenciesImpl(
+			Set<? extends Entry<? extends BundleKey, ? extends BC>> dependencies,
+			Map<Entry<? extends BundleKey, ? extends BC>, ? extends Map<? extends BundleKey, ? extends BC>> domainresults,
+			Set<BundleKey> result) {
+		for (Entry<? extends BundleKey, ? extends BC> depid : dependencies) {
+			if (result.add(depid.getKey())) {
+				Map<? extends BundleKey, ? extends BC> depdeps = domainresults.get(depid);
+				collectFullDomainDependenciesImpl(depdeps.entrySet(), domainresults, result);
+			}
+		}
+	}
+
+	private static class StorageInitializationInfo {
+		final AbstractStorageKey storageKey;
+		final NavigableMap<String, String> userParameters;
+		AbstractBundleStorageView storageView;
+		String storageViewStringIdentifier;
+
+		public StorageInitializationInfo(AbstractStorageKey storageKey, NavigableMap<String, String> userParameters) {
+			this.storageKey = storageKey;
+			this.userParameters = userParameters;
+		}
+	}
+
+	private static class DetectedChanges {
+		Map<AbstractBundleStorageView, Object> detectedChanges;
+
+		public DetectedChanges(Map<AbstractBundleStorageView, Object> detectedChanges) {
+			this.detectedChanges = detectedChanges;
+		}
+	}
+
+	private static Set<? extends BundleKey> toBundleKeySet(
+			Set<? extends Entry<? extends BundleKey, ? extends BundleVersionLookupResult>> dependencies) {
+		Set<BundleKey> result = new HashSet<>();
+		for (Entry<? extends BundleKey, ? extends BundleVersionLookupResult> dep : dependencies) {
+			result.add(dep.getKey());
+		}
+		return result;
+	}
+
+	private static class ClassLoaderDomain {
+		private final BundleKey bundle;
+		private final Set<? extends BundleKey> dependencies;
+
+		public ClassLoaderDomain(BundleKey bundle, Set<? extends BundleKey> dependencies) {
+			this.bundle = bundle;
+			this.dependencies = dependencies;
+		}
+
+		@Override
+		public int hashCode() {
+			final int prime = 31;
+			int result = 1;
+			result = prime * result + bundle.hashCode();
+			result = prime * result + dependencies.hashCode();
+			return result;
+		}
+
+		@Override
+		public boolean equals(Object obj) {
+			if (this == obj)
+				return true;
+			if (obj == null)
+				return false;
+			if (getClass() != obj.getClass())
+				return false;
+			ClassLoaderDomain other = (ClassLoaderDomain) obj;
+			if (bundle == null) {
+				if (other.bundle != null)
+					return false;
+			} else if (!bundle.equals(other.bundle))
+				return false;
+			if (dependencies == null) {
+				if (other.dependencies != null)
+					return false;
+			} else if (!dependencies.equals(other.dependencies))
+				return false;
+			return true;
+		}
+
+		@Override
+		public String toString() {
+			StringBuilder sb = new StringBuilder();
+			sb.append(getClass().getSimpleName());
+			sb.append("[bundle=");
+			sb.append(bundle.getBundleIdentifier());
+			sb.append(", dependencies=[");
+			for (Iterator<? extends BundleKey> it = dependencies.iterator(); it.hasNext();) {
+				BundleKey dep = it.next();
+				sb.append(dep.getBundleIdentifier());
+				if (it.hasNext()) {
+					sb.append(", ");
+				}
+			}
+			sb.append("]]");
+			return sb.toString();
+		}
+
+	}
+
+}

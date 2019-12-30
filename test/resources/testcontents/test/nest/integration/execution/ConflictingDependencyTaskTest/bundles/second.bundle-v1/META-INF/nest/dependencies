@@ -1,0 +1,4 @@
+dep.bundle
+	classpath: 2
+intermediate.bundle
+	classpath: 1

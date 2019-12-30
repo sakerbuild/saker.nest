@@ -1,0 +1,5 @@
+build(
+	out first = first.task(),
+	out second = second.task(),
+) {
+}

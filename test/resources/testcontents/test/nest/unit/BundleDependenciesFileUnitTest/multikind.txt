@@ -1,0 +1,3 @@
+my.bundle
+	runtime, core,, main: 1.0
+	

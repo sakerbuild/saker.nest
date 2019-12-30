@@ -1,0 +1,4 @@
+build {
+	first.task()
+	second.task()
+}

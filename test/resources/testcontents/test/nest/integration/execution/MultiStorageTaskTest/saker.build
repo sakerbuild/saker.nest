@@ -1,0 +1,17 @@
+build {
+	simple.task()
+}
+dep{
+	dep.task()
+}
+optionaldep{
+	dep.optional.task()
+}
+optionaldep2{
+	#add a param to reinvoke the task
+	dep.optional.task(abc: 1)
+}
+optionaldep3{
+	#add a param to reinvoke the task
+	dep.optional.task(abc: 2)
+}
