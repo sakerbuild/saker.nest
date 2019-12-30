@@ -1,0 +1,13 @@
+dep.bundle-jre8
+	classpath: 1
+		jre-version: 8
+	
+dep.bundle-jre910
+	classpath: 1
+		jre-version: [9, 10]
+	
+dep.bundle-jre11over
+	classpath: 1
+		jre-version: 11
+	classpath: [2)
+		jre-version: [12)

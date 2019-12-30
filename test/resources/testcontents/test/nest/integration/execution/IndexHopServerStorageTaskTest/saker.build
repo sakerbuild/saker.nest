@@ -1,0 +1,6 @@
+build {
+	simple.task()
+}
+sbuild {
+	simple.s.task()
+}

@@ -1,0 +1,6 @@
+my.bundle
+	runtime: 1.0
+		optional: true
+		meta2: 123
+	other: 3.0
+		meta3: abc

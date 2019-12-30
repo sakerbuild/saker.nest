@@ -1,0 +1,21 @@
+my.bundle
+	runtime: 1.0
+		empty: ""  
+		emptynonq: 
+		slash: \
+		spaced: a b
+		meta2: "123"   
+		qquote: ""123""  
+		lines: "1
+2"  
+		line3: "1
+2
+3"
+		qend: "1
+"\
+2"  
+		qline2: "1"\
+2"
+
+other.bundle
+	runtime: 1

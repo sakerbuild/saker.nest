@@ -1,0 +1,2 @@
+exported.task=test.nest.integration.execution.LocalInstallAddTaskTaskTest$ExportedTask
+exported.task2=test.nest.integration.execution.LocalInstallAddTaskTaskTest$ExportedTask2

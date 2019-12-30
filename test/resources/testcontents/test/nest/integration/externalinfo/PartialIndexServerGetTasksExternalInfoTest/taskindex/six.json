@@ -1,0 +1,10 @@
+{
+	"identity": "0",
+	"type": "lookup",
+	"base": "six",
+	"tasks": {
+		"six.task": [
+			"simple.bundle-v1"
+		]
+	}
+}

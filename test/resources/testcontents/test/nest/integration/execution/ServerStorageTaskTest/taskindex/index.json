@@ -1,0 +1,10 @@
+{
+	"identity": "0",
+	"type": "lookup",
+	"base": "",
+	"tasks": {
+		"simple.task": [
+			"simple.bundle-v1"
+		]
+	}
+}

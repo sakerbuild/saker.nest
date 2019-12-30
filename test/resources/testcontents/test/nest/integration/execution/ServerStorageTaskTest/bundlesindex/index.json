@@ -1,0 +1,8 @@
+{
+	"identity": "0",
+	"type": "lookup",
+	"base": "",
+	"bundles": [
+		"simple.bundle-v1"
+	]
+}

@@ -1,0 +1,9 @@
+{
+	"identity": "1",
+	"type": "lookup",
+	"base": "s",
+	"bundles": [
+		"simple.bundle-v1",
+		"second.bundle-v1",
+	]
+}

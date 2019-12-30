@@ -1,0 +1,3 @@
+dep.bundle
+	classpath: 1
+		optional: true

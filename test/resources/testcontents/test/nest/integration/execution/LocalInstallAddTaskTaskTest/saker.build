@@ -1,0 +1,13 @@
+export {
+	export.bundle.task()
+}
+use1(
+	out val
+) {
+	$val = exported.task()
+}
+use2(
+	out val
+) {
+	$val = exported.task2()
+}

@@ -1,0 +1,6 @@
+Manifest-Version: 1.0
+Nest-Bundle-Format-Version: 1
+Nest-Bundle-Identifier: simple.bundle-v1
+Main-Class: test.nest.integration.
+ UnsupportedJreMainActionTest$SimpleMain
+Nest-ClassPath-Supported-JRE-Versions: [8, 9]
