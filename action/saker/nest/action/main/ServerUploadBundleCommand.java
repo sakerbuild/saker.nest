@@ -64,8 +64,9 @@ public class ServerUploadBundleCommand {
 		}
 		UploadResult uploadresult = ServerStorageUtils.uploadBundle(server, bundle, os -> Files.copy(file, os), apiKey,
 				apiSecret, overwrite);
-		System.out.println("Uploaded bundle with identifier: " + bundle + " and MD5 hash: "
-				+ StringUtils.toHexString(uploadresult.getMD5Hash()));
+		System.out.println("Uploaded bundle: " + bundle);
+		System.out.println("    SHA: " + StringUtils.toHexString(uploadresult.getSHA256Hash()));
+		System.out.println("    MD5: " + StringUtils.toHexString(uploadresult.getMD5Hash()));
 	}
 
 	/**

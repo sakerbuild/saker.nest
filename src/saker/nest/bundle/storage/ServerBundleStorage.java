@@ -1387,6 +1387,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 				Path indexfilepath, String expectedidentity) throws IOException {
 			file_reader:
 			try {
+				boolean acceptcached = (options.flags & FLAG_OFFLINE) == FLAG_OFFLINE;
 				if (expectedidentity == null) {
 					if (!((options.flags & FLAG_OFFLINE) == FLAG_OFFLINE)) {
 						//only check validation of the file if we can make requests
@@ -1400,20 +1401,20 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 							//the index file is considered to be expired
 							break file_reader;
 						}
-					} else {
-						//we are offline. notify the options about the non-query reuse
-						//the operation initiator may issue async load request if appropriate
-						options.indexFileOfflineReused(additionalurl, indexfilepath);
+						acceptcached = true;
 					}
 				}
 				try (InputStream is = Files.newInputStream(indexfilepath);
 						InputStreamReader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
 					JSONObject result = new JSONObject(new JSONTokener(reader));
 					//we accept the cached file if
-					//    we're offline and expect no identity
+					//    we're offline (or cache not expired) and expect no identity
 					//    or the identity is the same as the expected
 					if (expectedidentity == null) {
-						if ((options.flags & FLAG_OFFLINE) == FLAG_OFFLINE) {
+						if (acceptcached) {
+							//notify the options about the non-query reuse
+							//the operation initiator may issue async load request if appropriate
+							options.indexFileOfflineReused(additionalurl, indexfilepath);
 							return result;
 						}
 					} else if (expectedidentity.equals(result.getString("identity"))) {

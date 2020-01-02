@@ -25,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import saker.build.file.path.SakerPath;
 import saker.build.file.provider.LocalFileProvider;
@@ -85,7 +86,7 @@ public class ServerStorageTaskTest extends CollectingMetricEnvironmentTestCase {
 	}
 
 	private Path bundleOutDir = getBuildDirectory().resolve("bundleout");
-	private NestMetric nm = new NestMetricImplementation();
+	private NestMetricImplementation nm = new NestMetricImplementation();
 
 	@Override
 	public void executeRunning() throws Exception {
@@ -121,21 +122,30 @@ public class ServerStorageTaskTest extends CollectingMetricEnvironmentTestCase {
 		NestIntegrationTestUtils.createAllJarsFromDirectoriesWithClasses(LocalFileProvider.getInstance(),
 				SakerPath.valueOf(workdir).resolve("bundles"), bundleOutDir, bundleclasses);
 
+		//also verify that the index files are reused properly instead of queried again from the server
+
 		runScriptTask("build");
 		assertEquals(System.clearProperty(PROPERTY_NAME), "hello");
+		assertEquals(nm.taskIndexQueryCounter.getAndSet(0), 1);
 
 		runScriptTask("build");
 		assertEmpty(getMetric().getRunTaskIdFactories());
 		assertEquals(System.clearProperty(PROPERTY_NAME), null);
+		assertEquals(nm.taskIndexQueryCounter.getAndSet(0), 0);
 	}
 
 	private final class NestMetricImplementation extends BasicServerNestMetric {
+		AtomicInteger taskIndexQueryCounter = new AtomicInteger();
+		AtomicInteger bundleIndexQueryCounter = new AtomicInteger();
+
 		@Override
 		public Integer getServerRequestResponseCode(String requesturl) throws IOException {
 			if ("https://testurl/bundle/download/simple.bundle-v1".equals(requesturl)) {
 				return HttpURLConnection.HTTP_OK;
 			}
 			if ("https://testurl/tasks/index".equals(requesturl)) {
+				taskIndexQueryCounter.getAndIncrement();
+				Thread.dumpStack();
 				return HttpURLConnection.HTTP_OK;
 			}
 			if ("https://testurl/bundles/index".equals(requesturl)) {
