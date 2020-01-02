@@ -229,6 +229,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 
 	private static final int MAX_INCLUDED_BUNDLE_SIGNATURE_KEY_VERSION = 1;
 	private final ConcurrentSkipListMap<Integer, PublicKey> bundleSignatureKeys = new ConcurrentSkipListMap<>();
+	private final ConcurrentSkipListMap<Integer, Object> bundleSignatureKeyLoadLocks = new ConcurrentSkipListMap<>();
 
 	private static final int VERIFICATION_STATE_VERIFYING = 1;
 	private static final int VERIFICATION_STATE_VERIFIED = 2;
@@ -415,53 +416,60 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		if (presentkey != null) {
 			return presentkey;
 		}
-		byte[] keybytes;
-		if (version <= MAX_INCLUDED_BUNDLE_SIGNATURE_KEY_VERSION
-				&& ServerBundleStorageView.REPOSITORY_DEFAULT_SERVER_URL.equals(serverHost)) {
-			try (InputStream in = ServerBundleStorage.class.getClassLoader()
-					.getResourceAsStream("bundle_signature_key/" + version)) {
-				if (in == null) {
-					//this shouldn't ever happen, but do not throw, as that would distrupt operations more severly
-					System.err.println("Failed to retrieve Nest repository built-in resource: "
-							+ "bundle_signature_key/" + version);
-					return null;
+		//lock so the keys aren't loaded concurrently. it would be unnecessary
+		synchronized (bundleSignatureKeyLoadLocks.computeIfAbsent(version, Functionals.objectComputer())) {
+			presentkey = bundleSignatureKeys.get(version);
+			if (presentkey != null) {
+				return presentkey;
+			}
+			byte[] keybytes;
+			if (version <= MAX_INCLUDED_BUNDLE_SIGNATURE_KEY_VERSION
+					&& ServerBundleStorageView.REPOSITORY_DEFAULT_SERVER_URL.equals(serverHost)) {
+				try (InputStream in = ServerBundleStorage.class.getClassLoader()
+						.getResourceAsStream("bundle_signature_key/" + version)) {
+					if (in == null) {
+						//this shouldn't ever happen, but do not throw, as that would distrupt operations more severly
+						System.err.println("Failed to retrieve Nest repository built-in resource: "
+								+ "bundle_signature_key/" + version);
+						return null;
+					}
+
+					keybytes = StreamUtils.readStreamFully(in).copyOptionally();
 				}
 
-				keybytes = StreamUtils.readStreamFully(in).copyOptionally();
+			} else {
+				if (offline) {
+					throw new OfflineStorageIOException(
+							"Cannot fetch bundle signing key for offline storage: " + serverHost);
+				}
+				// fetch from server
+				ByteArrayRegion retrievedkeybytes = makeServerRequest(false,
+						serverHost + "/bundle_signature_key/" + version, (rc, in, err, headerfunc) -> {
+							if (rc == HttpURLConnection.HTTP_OK) {
+								return StreamUtils.readStreamFully(in.get());
+							}
+							String errstr = "";
+							IOException errexc = null;
+							try {
+								errstr = readErrorStreamOrEmpty(err);
+							} catch (IOException e) {
+								errexc = e;
+							}
+							throw IOUtils.addExc(new IOException("Failed to retrive bundle signing key, response code: "
+									+ rc + " with error: " + errstr), errexc);
+						});
+				keybytes = retrievedkeybytes.copyOptionally();
 			}
-
-		} else {
-			if (offline) {
-				throw new OfflineStorageIOException(
-						"Cannot fetch bundle signing key for offline storage: " + serverHost);
+			try {
+				KeyFactory kf = KeyFactory.getInstance("RSA");
+				X509EncodedKeySpec keyspec = new X509EncodedKeySpec(keybytes);
+				PublicKey result = kf.generatePublic(keyspec);
+				bundleSignatureKeys.put(version, result);
+				return result;
+			} catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
+				System.err.println("Failed to generate Nest repository bundle signing key: " + e);
+				return null;
 			}
-			// fetch from server
-			ByteArrayRegion retrievedkeybytes = makeServerRequest(false,
-					serverHost + "/bundle_signature_key/" + version, (rc, in, err, headerfunc) -> {
-						if (rc == HttpURLConnection.HTTP_OK) {
-							return StreamUtils.readStreamFully(in.get());
-						}
-						String errstr = "";
-						IOException errexc = null;
-						try {
-							errstr = readErrorStreamOrEmpty(err);
-						} catch (IOException e) {
-							errexc = e;
-						}
-						throw IOUtils.addExc(new IOException("Failed to retrive bundle signing key, response code: "
-								+ rc + " with error: " + errstr), errexc);
-					});
-			keybytes = retrievedkeybytes.copyOptionally();
-		}
-		try {
-			KeyFactory kf = KeyFactory.getInstance("RSA");
-			X509EncodedKeySpec keyspec = new X509EncodedKeySpec(keybytes);
-			PublicKey result = kf.generatePublic(keyspec);
-			bundleSignatureKeys.put(version, result);
-			return result;
-		} catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
-			System.err.println("Failed to generate Nest repository bundle signing key: " + e);
-			return null;
 		}
 	}
 
@@ -789,16 +797,16 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		try {
 			Signature signature;
 			//synchronize on the bundle so the channel is not accessed by concurrent verification threads
+			PublicKey signaturekey = getBundleSignatureKey(signatureholder.version, offline);
+			if (signaturekey == null) {
+				throw new BundleLoadingFailedException(
+						"Failed to verify bundle signature, missing public key: " + bundle.getBundleIdentifier());
+			}
 			synchronized (bundle) {
 				channel.position(0);
 				//don't close the created input stream, as that would close the channel
 				InputStream in = Channels.newInputStream(channel);
 				signature = Signature.getInstance(BUNDLE_SIGNATURE_ALGORITHM);
-				PublicKey signaturekey = getBundleSignatureKey(signatureholder.version, offline);
-				if (signaturekey == null) {
-					throw new BundleLoadingFailedException(
-							"Failed to verify bundle signature, missing public key: " + bundle.getBundleIdentifier());
-				}
 				signature.initVerify(signaturekey);
 				StreamUtils.copyStream(in, signature);
 			}
