@@ -936,6 +936,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 		BundleDependencyInformation basefiltereddepinfo = filterDependencyInformationForClassPath(
 				bundleinfo.getDependencyInformation(), CLASSPATH_DEPENDENCY_KIND_SINGLETON);
 		DependencyResolutionLogger<ClassLoaderDependencyResolutionBundleContext> logger = null;
+		List<Throwable> unsatisfiedsuppressions = new ArrayList<>();
 		DependencyResolutionResult<BundleKey, ClassLoaderDependencyResolutionBundleContext> satisfied = DependencyUtils
 				.satisfyDependencyRequirements(bundlekey,
 						new ClassLoaderDependencyResolutionBundleContext(baseversionlookupinfo), basefiltereddepinfo,
@@ -963,13 +964,16 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 								return filterDependencyInformationForClassPath(lookupbundledepinfo,
 										CLASSPATH_DEPENDENCY_KIND_SINGLETON);
 							} catch (BundleLoadingFailedException e) {
-								System.err.println("Failed to load bundle: " + bi + " (" + e + ")");
+								unsatisfiedsuppressions.add(e);
 							}
 							return null;
 						}, logger);
 		if (satisfied == null) {
 			//XXX handle dependency satisfaction failure better
-			throw new BundleDependencyUnsatisfiedException("Failed to satisfy dependencies for: " + bundleid);
+			BundleDependencyUnsatisfiedException unsatisfiedexc = new BundleDependencyUnsatisfiedException(
+					"Failed to satisfy dependencies for: " + bundleid);
+			unsatisfiedsuppressions.forEach(unsatisfiedexc::addSuppressed);
+			throw unsatisfiedexc;
 		}
 		synchronized (classLoaderLock) {
 			if (closed) {
