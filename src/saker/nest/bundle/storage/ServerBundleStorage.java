@@ -69,6 +69,7 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+import java.util.zip.GZIPInputStream;
 
 import saker.build.file.path.SakerPath;
 import saker.build.file.provider.LocalFileProvider;
@@ -614,6 +615,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 			}
 			URL url = new URL(requesturl);
 			HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+			connection.setRequestProperty("Accept-Encoding", "gzip");
 			if (method != null) {
 				connection.setRequestMethod(method);
 			}
@@ -627,7 +629,8 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 				throw new ServerConnectionFailedIOException("Failed to connect to: " + requesturl, e);
 			}
 			try {
-				return handler.handle(rc, connection::getInputStream, connection::getErrorStream,
+				return handler.handle(rc, () -> unGzipizeInputStream(connection, connection.getInputStream()),
+						() -> unGzipizeInputStream(connection, connection.getErrorStream()),
 						connection::getHeaderField);
 			} finally {
 				connection.disconnect();
@@ -635,6 +638,13 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		} catch (IOException e) {
 			throw new IOException("Failed to execute server request. (" + requesturl + ")", e);
 		}
+	}
+
+	private static InputStream unGzipizeInputStream(HttpURLConnection connection, InputStream is) throws IOException {
+		if ("gzip".equalsIgnoreCase(connection.getContentEncoding())) {
+			return new GZIPInputStream(is);
+		}
+		return is;
 	}
 
 	private static class BundleSignatureHolder {
