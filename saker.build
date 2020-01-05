@@ -81,6 +81,10 @@ apiexport(
 				Directory: "{$compile[main][ResourceDirectory]}/API_OUTPUT",
 				Resources: **/*.class,
 			},
+			{
+				Directory: resources/api/,
+				Resources: **,
+			},
 		],
 		Manifest: {
 			MainAttributes: {
@@ -114,8 +118,12 @@ export(
 				TargetDirectory: internal/action,
 			},
 			{
-				Directory: resources,
+				Directory: resources/main/,
 				Resources: **,
+			},
+			{
+				Files: LICENSE,
+				TargetDirectory: META-INF,
 			},
 		],
 		Includes: [
@@ -164,7 +172,11 @@ exportall(
 					$export[compile][action][SourceGenDirectory],
 				],
 				Resources: **/*.java
-			}
+			},
+			{
+				Files: LICENSE,
+				TargetDirectory: META-INF,
+			},
 		],
 		Manifest: {
 			MainAttributes: {
@@ -216,6 +228,10 @@ testexport(
 			{
 				Directory: $testutiljavac[ClassDirectory],
 				Resources: **,
+			},
+			{
+				Files: LICENSE,
+				TargetDirectory: META-INF,
 			},
 		],
 		Manifest: {

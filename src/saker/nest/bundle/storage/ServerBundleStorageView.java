@@ -159,7 +159,6 @@ public interface ServerBundleStorageView extends BundleStorageView {
 	 */
 	public static final String PARAMETER_MIN_SIGNATURE_VERSION = "signature.version.min";
 
-	//TODO verify url
 	/**
 	 * The default server URL that is used when no {@linkplain #PARAMETER_URL server URL parameter} is specified.
 	 */
