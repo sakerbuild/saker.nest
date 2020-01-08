@@ -43,6 +43,11 @@ public class NativeLibraryLoadTest extends ManualLoadedRepositoryTestCase {
 
 	@Override
 	protected void runTestOnRepo(SakerRepository repo) throws Exception {
+		if (!System.mapLibraryName("THE_LIB").equals("THE_LIB.dll")) {
+			//do not run the test on non Windows machines, as the library loading would fail
+			//TODO instead of skipping the test, test it for *nix and macOS
+			return;
+		}
 		TreeMap<String, Set<Class<?>>> bundleclasses = TestUtils.<String, Set<Class<?>>>treeMapBuilder()//
 				.put("simple.bundle-v1", ObjectUtils.newHashSet(SimpleMain.class))//
 				.build();

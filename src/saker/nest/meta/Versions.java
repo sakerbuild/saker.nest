@@ -51,7 +51,7 @@ public class Versions {
 	/**
 	 * The patch version of the Nest repository release.
 	 * <p>
-	 * The patch verison changes when bugfixes are added to the implementation.
+	 * The patch version changes when bugfixes are added to the implementation.
 	 * 
 	 * @see <a href="https://semver.org/">https://semver.org/</a>
 	 */
