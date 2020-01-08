@@ -50,7 +50,8 @@ public class PartialIndexServerGetTasksExternalInfoTest extends ExternalScriptIn
 
 	@Override
 	protected void runOnInfoProvider(ExternalScriptInformationProvider infoprovider) {
-		//trigger test pre-download
+		//trigger test pre-download, multiple times to have the following indexes loaded as well.
+		infoprovider.getTasks(null);
 		infoprovider.getTasks(null);
 
 		assertEquals(infoprovider.getTasks(null).keySet(),
@@ -77,6 +78,9 @@ public class PartialIndexServerGetTasksExternalInfoTest extends ExternalScriptIn
 	private final class NestMetricImplementation extends BasicServerNestMetric {
 		@Override
 		public Integer getServerRequestResponseCode(String requesturl) throws IOException {
+			System.out.println(
+					"PartialIndexServerGetTasksExternalInfoTest.NestMetricImplementation.getServerRequestResponseCode() "
+							+ requesturl);
 			if ("https://testurl/bundle/download/simple.bundle-v1".equals(requesturl)) {
 				return HttpURLConnection.HTTP_OK;
 			}
@@ -100,6 +104,9 @@ public class PartialIndexServerGetTasksExternalInfoTest extends ExternalScriptIn
 
 		@Override
 		public InputStream getServerRequestResponseStream(String requesturl) throws IOException {
+			System.out.println(
+					"PartialIndexServerGetTasksExternalInfoTest.NestMetricImplementation.getServerRequestResponseStream() "
+							+ requesturl);
 			if ("https://testurl/bundle/download/simple.bundle-v1".equals(requesturl)) {
 				return Files.newInputStream(bundleOutDir.resolve("simple.bundle-v1.jar"));
 			}

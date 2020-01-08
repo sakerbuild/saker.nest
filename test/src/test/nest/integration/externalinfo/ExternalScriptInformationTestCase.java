@@ -51,9 +51,12 @@ public abstract class ExternalScriptInformationTestCase extends SakerTestCase {
 		ServiceLoaderClassPathServiceEnumerator<SakerRepositoryFactory> serviceloader = new ServiceLoaderClassPathServiceEnumerator<>(
 				SakerRepositoryFactory.class);
 
-		try (SakerEnvironmentImpl environment = new SakerEnvironmentImpl(
-				EnvironmentParameters.builder(EnvironmentTestCase.getSakerJarPath())
-						.setStorageDirectory(EnvironmentTestCase.getStorageDirectoryPath()).build())) {
+		//set a private test storage directory, and clear it before the test 
+		//  so the results of the previous build doesn't affect us 
+		Path teststoragedir = EnvironmentTestCase.getStorageDirectoryPath().resolve(getClass().getName());
+		LocalFileProvider.getInstance().clearDirectoryRecursively(teststoragedir);
+		try (SakerEnvironmentImpl environment = new SakerEnvironmentImpl(EnvironmentParameters
+				.builder(EnvironmentTestCase.getSakerJarPath()).setStorageDirectory(teststoragedir).build())) {
 			this.environment = environment;
 			initEnvironment(environment);
 

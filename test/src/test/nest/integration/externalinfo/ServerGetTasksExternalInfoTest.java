@@ -50,9 +50,10 @@ public class ServerGetTasksExternalInfoTest extends ExternalScriptInformationTes
 
 	@Override
 	protected void runOnInfoProvider(ExternalScriptInformationProvider infoprovider) {
+		System.out.println("ServerGetTasksExternalInfoTest.runOnInfoProvider() start");
 		//trigger test pre-download
 		infoprovider.getTasks(null);
-		
+
 		assertEquals(infoprovider.getTasks(null).keySet(),
 				setOf(TaskName.valueOf("simple.task"), TaskName.valueOf("six.task")));
 		assertEquals(infoprovider.getTasks("si").keySet(),
@@ -77,6 +78,8 @@ public class ServerGetTasksExternalInfoTest extends ExternalScriptInformationTes
 	private final class NestMetricImplementation extends BasicServerNestMetric {
 		@Override
 		public Integer getServerRequestResponseCode(String requesturl) throws IOException {
+			System.out.println("ServerGetTasksExternalInfoTest.NestMetricImplementation.getServerRequestResponseCode() "
+					+ requesturl);
 			if ("https://testurl/bundle/download/simple.bundle-v1".equals(requesturl)) {
 				return HttpURLConnection.HTTP_OK;
 			}
@@ -91,6 +94,9 @@ public class ServerGetTasksExternalInfoTest extends ExternalScriptInformationTes
 
 		@Override
 		public InputStream getServerRequestResponseStream(String requesturl) throws IOException {
+			System.out
+					.println("ServerGetTasksExternalInfoTest.NestMetricImplementation.getServerRequestResponseStream() "
+							+ requesturl);
 			if ("https://testurl/bundle/download/simple.bundle-v1".equals(requesturl)) {
 				return Files.newInputStream(bundleOutDir.resolve("simple.bundle-v1.jar"));
 			}
