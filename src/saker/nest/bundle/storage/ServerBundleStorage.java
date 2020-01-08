@@ -1050,6 +1050,10 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		public void indexFileOfflineReused(String additionalurl, Path indexfilepath) {
 			//ignore, subclass may override
 		}
+
+		public void missingIndexFile(String additionalurl, Path indexfilepath) {
+			//ignore, subclass may override
+		}
 	}
 
 	private static class AsyncDownloadStartingIndexOperationOptions extends IndexOperationOptions {
@@ -1075,6 +1079,11 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 				//the index file is considered to be expired
 				starter.accept(additionalurl, indexfilepath);
 			}
+		}
+
+		@Override
+		public void missingIndexFile(String additionalurl, Path indexfilepath) {
+			starter.accept(additionalurl, indexfilepath);
 		}
 
 	}
@@ -1142,6 +1151,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 							} catch (IOException e) {
 								if (((options.flags
 										& FLAG_MISSING_INDEX_ACCEPTABLE) == FLAG_MISSING_INDEX_ACCEPTABLE)) {
+									options.missingIndexFile(entry.getValue(), getIndexFilePath(entry.getValue()));
 									continue;
 								}
 								throw e;
