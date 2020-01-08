@@ -50,7 +50,8 @@ public class PartialIndexServerGetTasksExternalInfoTest extends ExternalScriptIn
 
 	@Override
 	protected void runOnInfoProvider(ExternalScriptInformationProvider infoprovider) {
-		//trigger test pre-download
+		//trigger test pre-download, multiple times to have the following indexes loaded as well.
+		infoprovider.getTasks(null);
 		infoprovider.getTasks(null);
 
 		assertEquals(infoprovider.getTasks(null).keySet(),
