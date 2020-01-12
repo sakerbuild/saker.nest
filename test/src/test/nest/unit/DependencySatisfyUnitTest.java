@@ -121,6 +121,8 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				.bundle("second.bundle-v1.0").depend("third.bundle", "1.0").build()//
 				.bundle("third.bundle-v1.0").depend("first.bundle", "1").build()//
 				.assertSatisfiable("first.bundle-v1", "second.bundle-v1.0", "third.bundle-v1.0")//
+				.assertSatisfiable("second.bundle-v1.0", "third.bundle-v1.0", "first.bundle-v1")//
+				.assertSatisfiable("third.bundle-v1.0", "first.bundle-v1", "second.bundle-v1.0")//
 		;
 		lookup()//
 				.bundle("first.bundle-v1").depend("second.bundle", "1.0").build()//
@@ -135,7 +137,7 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				.bundle("c.b-v1").build()//
 				.bundle("c.b-v2").build()//
 				.bundle("d.b-v1").depend("c.b", "1").build()//
-				.assertSatisfiable("a.b-v1", "a.b-v1", "b.b-v1", "d.b-v1", "c.b-v1")//
+				.assertSatisfiable("a.b-v1", "b.b-v1", "d.b-v1", "c.b-v1")//
 
 				.bundle("d.b-v1.1").depend("c.b", "2").build()//
 				.assertSatisfiable("a.b-v1", "b.b-v2", "d.b-v1.1", "c.b-v2")//
@@ -182,6 +184,17 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 		;
 
 		lookup()//
+				.bundle("a.b-v1").depend("o1.b", "1").dependOptional("o2.b", "1").build()//
+				.assertNotSatisfiable("a.b-v1")//
+
+				.bundle("o1.b-v1").build()//
+				.assertSatisfiable("a.b-v1", "o1.b-v1")//
+
+				.bundle("o2.b-v1").build()//
+				.assertSatisfiable("a.b-v1", "o1.b-v1", "o2.b-v1")//
+		;
+
+		lookup()//
 				.bundle("b1.bundle-v1").depend("dep.bundle", "1.0").build()//
 				.bundle("b2.bundle-v1").depend("dep.bundle", "1.0").build()//
 				.bundle("dep.bundle-v1.0").build()//
@@ -210,6 +223,30 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				.assertSatisfiable("first-v1", "dep-v1", "dep2-v1", "third-v1", "fourth-v1")
 
 		;
+
+		//the test from the related issue: https://github.com/sakerbuild/saker.nest/issues/5
+		lookup()//
+				.bundle("first.bundle-v1").depend("common.bundle", "1.0").depend("dependent.bundle", "1.0").build()//
+				.bundle("dependent.bundle-v1.0").dependPrivate("common.bundle", "[1, 3.0]").build()//
+				.bundle("common.bundle-v1.0").build()//
+				.bundle("common.bundle-v2.0").build()//
+				.bundle("common.bundle-v3.0").build()//
+
+				.assertSatisfiable("first.bundle-v1", "common.bundle-v1.0", "dependent.bundle-v1.0",
+						"common.bundle-v3.0")
+
+		;
+
+		//circular private
+		lookup()//
+				.bundle("first.bundle-v1").dependPrivate("second.bundle", "1.0").build()//
+				.bundle("second.bundle-v1.0").dependPrivate("third.bundle", "1.0").build()//
+				.bundle("third.bundle-v1.0").dependPrivate("first.bundle", "1").build()//
+				.assertSatisfiable("first.bundle-v1", "second.bundle-v1.0", "third.bundle-v1.0")//
+				.assertSatisfiable("second.bundle-v1.0", "third.bundle-v1.0", "first.bundle-v1")//
+				.assertSatisfiable("third.bundle-v1.0", "first.bundle-v1", "second.bundle-v1.0")//
+		;
+
 	}
 
 	private static LookupContext lookup() {
@@ -233,24 +270,45 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 			DependencyResolutionResult<?, ?> satisfied = satisfy(bundleid);
 			assertNonNull(satisfied, "Failed to satisfy: " + bundleid);
 			Set<BundleIdentifier> bundleidset = bundleIdSetOf(bundleid, expectedbundles);
-			assertEquals(satisfied.getResultInAnyOrder().values().stream().map(Entry::getKey)
-					.map(BundleIdentifierHolder::getBundleIdentifier)
-					.collect(Collectors.toCollection(LinkedHashSet::new)), bundleidset);
-			assertEquals(satisfied.getResultInDeclarationOrder().values().stream().map(Entry::getKey)
-					.map(BundleIdentifierHolder::getBundleIdentifier).toArray(), bundleidset.toArray());
+
+			assertResults(satisfied, bundleidset);
+
 			satisfied.getDependencyDomainResult().entrySet().forEach(System.out::println);
 			return this;
+		}
+
+		private static void assertResults(DependencyResolutionResult<?, ?> satisfied, Set<BundleIdentifier> bundleidset)
+				throws AssertionError {
+			//assert that it contains the same bundles
+
+			BundleIdentifier[] domainresultbundleidarray = ((Map<? extends Entry<? extends BundleIdentifierHolder, ?>, ? extends Map<?, ?>>) satisfied
+					.getDependencyDomainResult()).keySet().stream().map(Entry::getKey)
+							.map(BundleIdentifierHolder::getBundleIdentifier).toArray(BundleIdentifier[]::new);
+			assertResults(bundleidset, domainresultbundleidarray);
+
+			BundleIdentifier[] declresultbundleidarray = satisfied.getResultInDeclarationOrder().values().stream()
+					.map(Entry::getKey).map(BundleIdentifierHolder::getBundleIdentifier)
+					.toArray(BundleIdentifier[]::new);
+			if (declresultbundleidarray.length == bundleidset.size()) {
+				//only check if the size is the same. as private dependencies can occur more than once, it can cause false negatives
+				assertResults(bundleidset, declresultbundleidarray);
+			}
+		}
+
+		private static void assertResults(Set<BundleIdentifier> bundleidset, BundleIdentifier[] resultbundleidarray)
+				throws AssertionError {
+			assertEquals(ObjectUtils.newLinkedHashSet(resultbundleidarray), bundleidset);
+			//assert that it contains the same bundles in the same order
+			assertEquals(resultbundleidarray, bundleidset.toArray());
 		}
 
 		public LookupContext assertMultiSatisfiable(String[] bundleids, String[] expectedbundles) {
 			DependencyResolutionResult<?, ?> satisfied = satisfyMultiple(bundleids);
 			assertNonNull(satisfied, "Failed to satisfy: " + Arrays.toString(bundleids));
 			Set<BundleIdentifier> bundleidset = bundleIdSetOf("pseudo.bundle-v1", expectedbundles);
-			assertEquals(satisfied.getResultInAnyOrder().values().stream().map(Entry::getKey)
-					.map(BundleIdentifierHolder::getBundleIdentifier)
-					.collect(Collectors.toCollection(LinkedHashSet::new)), bundleidset);
-			assertEquals(satisfied.getResultInDeclarationOrder().values().stream().map(Entry::getKey)
-					.map(BundleIdentifierHolder::getBundleIdentifier).toArray(), bundleidset.toArray());
+
+			assertResults(satisfied, bundleidset);
+
 			satisfied.getDependencyDomainResult().entrySet().forEach(System.out::println);
 			return this;
 		}
@@ -339,13 +397,17 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				this.id = id;
 			}
 
-			public BundleDependencyBuilder depend(String bundleidstr, String range, boolean optional) {
+			public BundleDependencyBuilder depend(String bundleidstr, String range, Boolean optional,
+					Boolean privatedep) {
 				BundleIdentifier bundleid = BundleIdentifier.valueOf(bundleidstr);
 				assertNull(bundleid.getVersionQualifier(), "Version qualifier in: " + bundleid);
 				BundleDependency.Builder nbuilder = BundleDependency.builder().addKind("runtime")
 						.setRange(VersionRange.valueOf(range));
-				if (optional) {
-					nbuilder.addMetaData(BundleInformation.DEPENDENCY_META_OPTIONAL, "true");
+				if (optional != null) {
+					nbuilder.addMetaData(BundleInformation.DEPENDENCY_META_OPTIONAL, optional.toString());
+				}
+				if (privatedep != null) {
+					nbuilder.addMetaData(BundleInformation.DEPENDENCY_META_PRIVATE, privatedep.toString());
 				}
 				Object prev = dependencies.put(bundleid, nbuilder);
 				if (prev != null) {
@@ -354,12 +416,20 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				return this;
 			}
 
+			public BundleDependencyBuilder depend(String bundleidstr, String range, Boolean optional) {
+				return depend(bundleidstr, range, optional, null);
+			}
+
 			public BundleDependencyBuilder depend(String bundleidstr, String range) {
-				return depend(bundleidstr, range, false);
+				return depend(bundleidstr, range, null);
 			}
 
 			public BundleDependencyBuilder dependOptional(String bundleidstr, String range) {
 				return depend(bundleidstr, range, true);
+			}
+
+			public BundleDependencyBuilder dependPrivate(String bundleidstr, String range) {
+				return depend(bundleidstr, range, null, true);
 			}
 
 			public LookupContext build() {

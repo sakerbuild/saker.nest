@@ -137,6 +137,7 @@ public final class BundleDependency implements Externalizable {
 	 * 
 	 * @return <code>true</code> if the dependency was declared to be private in the meta-datas.
 	 * @see BundleInformation#DEPENDENCY_META_PRIVATE
+	 * @since saker.nest 0.8.1
 	 */
 	public boolean isPrivate() {
 		return Boolean.parseBoolean(metaData.get(BundleInformation.DEPENDENCY_META_PRIVATE));

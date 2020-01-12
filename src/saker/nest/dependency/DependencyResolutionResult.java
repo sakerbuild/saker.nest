@@ -44,7 +44,10 @@ public interface DependencyResolutionResult<BK extends BundleIdentifierHolder, B
 	 * version qualifiers}.
 	 * 
 	 * @return The dependency resolution result.
+	 * @deprecated This method cannot properly represent private dependencies. Use {@link #getDependencyDomainResult()}
+	 *                 instead.
 	 */
+	@Deprecated
 	public Map<Entry<? extends BundleIdentifier, ? extends BC>, Entry<? extends BK, ? extends BC>> getResultInAnyOrder();
 
 	/**
@@ -59,7 +62,10 @@ public interface DependencyResolutionResult<BK extends BundleIdentifierHolder, B
 	 * version qualifiers}.
 	 * 
 	 * @return The dependency resolution result in declaration order.
+	 * @deprecated This method cannot properly represent private dependencies. Use {@link #getDependencyDomainResult()}
+	 *                 instead.
 	 */
+	@Deprecated
 	public Map<Entry<? extends BundleIdentifier, ? extends BC>, Entry<? extends BK, ? extends BC>> getResultInDeclarationOrder();
 
 	/**

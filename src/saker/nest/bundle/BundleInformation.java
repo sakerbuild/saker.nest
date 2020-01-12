@@ -296,6 +296,8 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	 * <p>
 	 * A private bundle dependency is considered to be an implementation detail for the bundle. The bundle doesn't
 	 * publish data from a private through it's API.
+	 * 
+	 * @since saker.nest 0.8.1
 	 */
 	public static final String DEPENDENCY_META_PRIVATE = "private";
 

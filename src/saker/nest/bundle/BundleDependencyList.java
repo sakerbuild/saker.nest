@@ -155,6 +155,9 @@ public final class BundleDependencyList implements Externalizable {
 		if (!hadoptional) {
 			return this;
 		}
+		if (ndeps.isEmpty()) {
+			return EMPTY;
+		}
 		return new BundleDependencyList(ImmutableUtils.unmodifiableSet(ndeps));
 	}
 
