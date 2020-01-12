@@ -1122,7 +1122,8 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 
 		@Override
 		public void handleChanges(ExecutionPathConfiguration pathconfig, Object detectedchanges) {
-			//XXX we should handle the pending bundles if no others use the local storage
+			//we don't handle the pending bundles here, as the pending bundles 
+			//  may be used in cached objects in the build environment or other build environments
 			synchronized (detectChangeLock) {
 				//rediscover the bundles to apply, as they might've been changed between the detectchanges and handlechanges calls
 				NavigableMap<BundleIdentifier, NavigableMap<Integer, Path>> pendingbundles = getPendingBundles();

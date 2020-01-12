@@ -292,6 +292,14 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	public static final String DEPENDENCY_META_OPTIONAL = "optional";
 
 	/**
+	 * Bundle dependency meta data name for specifying that a dependency is optional.
+	 * <p>
+	 * A private bundle dependency is considered to be an implementation detail for the bundle. The bundle doesn't
+	 * publish data from a private through it's API.
+	 */
+	public static final String DEPENDENCY_META_PRIVATE = "private";
+
+	/**
 	 * Dependency meta-data name for specifying the Java Runtime versions the dependency applies to.
 	 * <p>
 	 * The value of the meta-data is a {@link VersionRange} that specifies the JRE major version number range that the
