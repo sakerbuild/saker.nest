@@ -40,6 +40,7 @@ import saker.build.thirdparty.saker.util.ImmutableUtils;
 import saker.build.thirdparty.saker.util.StringUtils;
 import saker.build.thirdparty.saker.util.function.Functionals;
 import saker.build.thirdparty.saker.util.function.LazySupplier;
+import saker.nest.ConfiguredRepositoryStorage;
 import saker.nest.bundle.BundleDependency;
 import saker.nest.bundle.BundleDependencyInformation;
 import saker.nest.bundle.BundleDependencyList;
@@ -277,7 +278,7 @@ public class DependencyUtils {
 						continue;
 					}
 					deplist = onlyOptionals(deplist);
-					if (isAllPrivateDependencies(deplist)) {
+					if (ConfiguredRepositoryStorage.isAllPrivateDependencies(deplist)) {
 						//the optional dependency refers to a private dependency
 						Iterable<? extends Entry<? extends BK, ? extends BC>> lookedupbundles = cachingbundleslookupfunction
 								.apply(entry.getKey(), bundledomain.bundleEntry.getValue());
@@ -772,7 +773,7 @@ public class DependencyUtils {
 				domain.directDependencies.keySet().removeAll(deprs.satisfiedDomain.keySet());
 				deprs.satisfiedDomain = null;
 			}
-			if (isAllPrivateDependencies(deprs.dependencyList)) {
+			if (ConfiguredRepositoryStorage.isAllPrivateDependencies(deprs.dependencyList)) {
 				//handle private dependencies specially
 				for (Entry<? extends BK, ? extends BC> bundleentry : deprs.lookedupBundles) {
 					if (!isAllDependencyIncludesVersion(deprs.dependencyList,
@@ -932,15 +933,6 @@ public class DependencyUtils {
 				return false;
 			return true;
 		}
-	}
-
-	private static boolean isAllPrivateDependencies(BundleDependencyList deplist) {
-		for (BundleDependency dep : deplist.getDependencies()) {
-			if (!dep.isPrivate()) {
-				return false;
-			}
-		}
-		return true;
 	}
 
 	private static <BK extends BundleIdentifierHolder, BC> Entry<Entry<? extends BK, ? extends BC>, DomainResult<BK, BC>> getDependencyEntryWithBundleId(

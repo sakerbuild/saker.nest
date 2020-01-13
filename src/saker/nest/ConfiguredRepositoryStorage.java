@@ -1100,42 +1100,69 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 		return BundleDependencyInformation.create(resultdeps);
 	}
 
-	private static <BC> ClassLoaderDomain createClassLoaderDomain(BundleKey domainbundleid,
+	private <BC> ClassLoaderDomain createClassLoaderDomain(BundleKey domainbundleid,
 			DependencyDomainResolutionResult<BundleKey, BC> dependencies) {
 		return createClassLoaderDomainImpl(null, domainbundleid, dependencies, new HashMap<>());
 	}
 
-	private static <BC> ClassLoaderDomain createClassLoaderDomainImpl(
-			DependencyDomainResolutionResult<BundleKey, BC> enclosingdomain, BundleKey domainbundleid,
+	private <BC> ClassLoaderDomain createClassLoaderDomainImpl(
+			DependencyDomainResolutionResult<BundleKey, BC> enclosingdomain, BundleKey enclosingbundleid,
 			DependencyDomainResolutionResult<BundleKey, BC> dependencies,
 			Map<Entry<DependencyDomainResolutionResult<BundleKey, BC>, BundleKey>, ClassLoaderDomain> constructeddomains) {
 		Entry<DependencyDomainResolutionResult<BundleKey, BC>, BundleKey> lookupentry = ImmutableUtils
-				.makeImmutableMapEntry(enclosingdomain, domainbundleid);
+				.makeImmutableMapEntry(enclosingdomain, enclosingbundleid);
 		ClassLoaderDomain presentdomain = constructeddomains.get(lookupentry);
 		if (presentdomain != null) {
 			return presentdomain;
 		}
 		LinkedHashMap<BundleKey, ClassLoaderDomain.DomainDependency> dependencydomains = new LinkedHashMap<>();
-		ClassLoaderDomain result = new ClassLoaderDomain(domainbundleid, dependencydomains);
+		ClassLoaderDomain result = new ClassLoaderDomain(enclosingbundleid, dependencydomains);
 		constructeddomains.put(lookupentry, result);
 
-		for (Entry<Entry<? extends BundleKey, ? extends BC>, ? extends DependencyDomainResolutionResult<BundleKey, BC>> entry : dependencies
-				.getDirectDependencies().entrySet()) {
-			BundleKey dependencybundlekey = entry.getKey().getKey();
-			ClassLoaderDomain depdomain = createClassLoaderDomainImpl(dependencies, dependencybundlekey,
-					entry.getValue(), constructeddomains);
-			boolean privateScope;
-			if (enclosingdomain == null) {
-				//when we create the root domain
-				privateScope = false;
-			} else {
-				//TODO HANDLE PRIVATE SCOPE
-				privateScope = false;
+		Map<Entry<? extends BundleKey, ? extends BC>, ? extends DependencyDomainResolutionResult<BundleKey, BC>> directdeps = dependencies
+				.getDirectDependencies();
+		if (!directdeps.isEmpty()) {
+			BundleDependencyInformation depinfo;
+			try {
+				depinfo = storageViewKeyStorageViews.get(enclosingbundleid.getStorageViewKey())
+						.getBundleInformation(enclosingbundleid.getBundleIdentifier()).getDependencyInformation();
+			} catch (NullPointerException | BundleLoadingFailedException e) {
+				throw new AssertionError(
+						"Failed to retrieve previously resolved bundle: " + enclosingbundleid.getBundleIdentifier(), e);
 			}
-			dependencydomains.put(dependencybundlekey, new ClassLoaderDomain.DomainDependency(depdomain, privateScope));
-		}
+			for (Entry<Entry<? extends BundleKey, ? extends BC>, ? extends DependencyDomainResolutionResult<BundleKey, BC>> entry : directdeps
+					.entrySet()) {
+				BundleKey dependencybundlekey = entry.getKey().getKey();
+				BundleDependencyList deplist = depinfo
+						.getDependencyList(dependencybundlekey.getBundleIdentifier().withoutMetaQualifiers());
+				if (deplist == null) {
+					throw new AssertionError("Dependency not found. " + dependencybundlekey.getBundleIdentifier()
+							+ " in " + enclosingbundleid);
+				}
 
+				ClassLoaderDomain depdomain = createClassLoaderDomainImpl(dependencies, dependencybundlekey,
+						entry.getValue(), constructeddomains);
+				boolean privateScope;
+				if (enclosingdomain == null) {
+					//when we create the root domain
+					privateScope = false;
+				} else {
+					privateScope = isAllPrivateDependencies(deplist);
+				}
+				dependencydomains.put(dependencybundlekey,
+						new ClassLoaderDomain.DomainDependency(depdomain, privateScope));
+			}
+		}
 		return result;
+	}
+
+	public static boolean isAllPrivateDependencies(BundleDependencyList deplist) {
+		for (BundleDependency dep : deplist.getDependencies()) {
+			if (!dep.isPrivate()) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	private static class StorageInitializationInfo {

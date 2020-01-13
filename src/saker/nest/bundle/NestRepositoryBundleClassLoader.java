@@ -30,6 +30,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentSkipListMap;
 
 import saker.build.thirdparty.saker.util.ImmutableUtils;
 import saker.build.thirdparty.saker.util.StringUtils;
@@ -72,6 +73,8 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 	private final Map<BundleKey, DependentClassLoader> dependencyClassLoaders;
 	private final LazySupplier<byte[]> hashWithClassPathDependencies;
 	private final BundleLookup relativeBundleLookup;
+
+	private final ConcurrentSkipListMap<String, Class<?>> bundleLoadedClasses = new ConcurrentSkipListMap<>();
 
 	public NestRepositoryBundleClassLoader(ConfiguredRepositoryStorage configuredStorage, BundleKey bundlekey,
 			AbstractNestRepositoryBundle bundle, Map<BundleKey, DependentClassLoader> dependencyClassLoaders,
@@ -127,15 +130,34 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 		return hashWithClassPathDependencies.get();
 	}
 
+	/**
+	 * Must be locked on {@link #getClassLoadingLock(String)}.
+	 * <p>
+	 * We can't use {@link #findLoadedClass(String)} as that may return classes that weren't defined by this
+	 * classloader.
+	 */
+	private Class<?> getAlreadyLoadedClassByThisBundle(String name) {
+		return bundleLoadedClasses.get(name);
+	}
+
 	//doc: this method doesn't search any classpath bundles, only the current one
 	public Class<?> loadClassFromBundle(String name) throws ClassNotFoundException {
 		synchronized (getClassLoadingLock(name)) {
-			Class<?> c = findLoadedClass(name);
+			Class<?> c = getAlreadyLoadedClassByThisBundle(name);
 			if (c != null) {
 				return c;
 			}
-			return super.findClass(name);
+			return loadDefineClassFromBundle(name);
 		}
+	}
+
+	/**
+	 * Must be locked on {@link #getClassLoadingLock(String)}.
+	 */
+	private Class<?> loadDefineClassFromBundle(String name) throws ClassNotFoundException {
+		Class<?> result = super.findClass(name);
+		bundleLoadedClasses.put(name, result);
+		return result;
 	}
 
 	@Override
@@ -143,14 +165,14 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 		ClassNotFoundException e = null;
 		Class<?> c;
 		synchronized (getClassLoadingLock(name)) {
-			c = findLoadedClass(name);
+			c = getAlreadyLoadedClassByThisBundle(name);
 			if (c == null) {
 				try {
 					c = Class.forName(name, false, getParent());
 				} catch (ClassNotFoundException e2) {
 					e = IOUtils.addExc(e, e2);
 					try {
-						c = super.findClass(name);
+						c = loadDefineClassFromBundle(name);
 					} catch (ClassNotFoundException e3) {
 						e = IOUtils.addExc(e, e3);
 					}
@@ -207,7 +229,7 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 	private Class<?> loadClassRecursively(Set<BundleKey> triedcls, String name, ClassNotFoundException e) {
 		// First, check if the class has already been loaded
 		synchronized (getClassLoadingLock(name)) {
-			Class<?> c = findLoadedClass(name);
+			Class<?> c = getAlreadyLoadedClassByThisBundle(name);
 			if (c != null) {
 				return c;
 			}
@@ -222,7 +244,7 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 			// If still not found, then invoke findClass in order
 			// to find the class.
 			try {
-				return super.findClass(name);
+				return loadDefineClassFromBundle(name);
 			} catch (ClassNotFoundException e2) {
 				e.addSuppressed(e2);
 			}
