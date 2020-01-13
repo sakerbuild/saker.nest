@@ -16,35 +16,31 @@ import testing.saker.nest.util.NestIntegrationTestUtils;
 
 @SakerTest
 @SuppressWarnings("unused")
-public class SimplePrivateDependencyTest extends ManualLoadedRepositoryTestCase {
+public class CommonPrivateDependencyTest extends ManualLoadedRepositoryTestCase {
 	public static class SimpleMain {
 		public static void main(String[] args) {
-			new DepClass();
+			DepClass dc = new DepClass();
 			new Third1();
-			try {
-				//should not be found
-				new Third2();
-				throw new AssertionError(Third2.class.getClassLoader());
-			} catch (LinkageError e) {
-			}
 			if (!NestUtils.getClassBundleIdentifier(Third.class).getVersionNumber().equals("1")) {
 				throw new AssertionError();
 			}
+			if (dc.getThird().getClass() != Third1.class) {
+				throw new AssertionError();
+			}
+
 		}
 	}
 
 	public static class DepClass {
 		public DepClass() {
-			try {
-				//should not be found
-				new Third1();
-				throw new AssertionError();
-			} catch (LinkageError e) {
-			}
-			new Third2();
-			if (!NestUtils.getClassBundleIdentifier(Third.class).getVersionNumber().equals("2")) {
+			new Third1();
+			if (!NestUtils.getClassBundleIdentifier(Third.class).getVersionNumber().equals("1")) {
 				throw new AssertionError();
 			}
+		}
+
+		public Third1 getThird() {
+			return new Third1();
 		}
 	}
 
@@ -58,18 +54,12 @@ public class SimplePrivateDependencyTest extends ManualLoadedRepositoryTestCase 
 		}
 	}
 
-	public static class Third2 {
-		public Third2() {
-		}
-	}
-
 	@Override
 	protected void runTestOnRepo(SakerRepository repo) throws Exception {
 		TreeMap<String, Set<Class<?>>> bundleclasses = TestUtils.<String, Set<Class<?>>>treeMapBuilder()//
 				.put("simple.bundle-v1", ObjectUtils.newHashSet(SimpleMain.class))//
 				.put("dep.bundle-v1", ObjectUtils.newHashSet(DepClass.class))//
 				.put("third.bundle-v1", ObjectUtils.newHashSet(Third.class, Third1.class))//
-				.put("third.bundle-v2", ObjectUtils.newHashSet(Third.class, Third2.class))//
 				.build();
 
 		String classsubdirpath = getClass().getName().replace('.', '/');

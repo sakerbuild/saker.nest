@@ -358,6 +358,35 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				.bundle("a-v2").build()//
 				.assertSatisfiable("a-v1", "b-v1", "c-v1", "a-v2")//
 		;
+
+		lookup()//
+				.bundle("a-v1").depend("b", "[1, 2]").depend("b", "[2, 3]").build()//
+				.bundle("b-v1").build()//
+				.assertNotSatisfiable("a-v1")//
+				.bundle("b-v3").build()//
+				.assertNotSatisfiable("a-v1")//
+				.bundle("b-v2").build()//
+				.assertSatisfiable("a-v1", "b-v2")//
+		;
+
+		lookup()//
+				.bundle("a-v1").dependPrivate("b", "1").dependPrivate("b", "2").build()//
+				.assertNotSatisfiable("a-v1")//
+				.bundle("b-v1").build()//
+				.assertNotSatisfiable("a-v1")//
+				.bundle("b-v2").build()//
+				.assertNotSatisfiable("a-v1")//
+		;
+
+		lookup()//
+				.bundle("a-v1").depend("p", "1").dependPrivate("b", "1").build()//
+				.bundle("b-v1").depend("p", "2").dependPrivate("c", "1").build()//
+				.bundle("c-v1").depend("p", "3").build()//
+				.bundle("p-v1").build()//
+				.bundle("p-v2").build()//
+				.bundle("p-v3").build()//
+				.assertSatisfiable("a-v1", "p-v1", "b-v1", "p-v2", "c-v1", "p-v3")//
+		;
 	}
 
 	private static LookupContext lookup() {

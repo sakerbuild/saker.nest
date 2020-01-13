@@ -180,8 +180,8 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 			}
 		}
 		if (c == null) {
-			Set<BundleKey> triedcls = new HashSet<>();
-			triedcls.add(this.bundleKey);
+			Set<NestBundleClassLoader> triedcls = new HashSet<>();
+			triedcls.add(this);
 			c = findClassRecursively(triedcls, name, e, true);
 		}
 		if (c != null) {
@@ -226,7 +226,7 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 		return null;
 	}
 
-	private Class<?> loadClassRecursively(Set<BundleKey> triedcls, String name, ClassNotFoundException e) {
+	private Class<?> loadClassRecursively(Set<NestBundleClassLoader> triedcls, String name, ClassNotFoundException e) {
 		// First, check if the class has already been loaded
 		synchronized (getClassLoadingLock(name)) {
 			Class<?> c = getAlreadyLoadedClassByThisBundle(name);
@@ -252,7 +252,7 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 		return findClassRecursively(triedcls, name, e, false);
 	}
 
-	private Class<?> findClassRecursively(Set<BundleKey> triedcls, String name, ClassNotFoundException e,
+	private Class<?> findClassRecursively(Set<NestBundleClassLoader> triedcls, String name, ClassNotFoundException e,
 			boolean allowprivate) {
 		if (dependencyClassLoaders.isEmpty()) {
 			return null;
@@ -262,7 +262,7 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 				continue;
 			}
 			NestRepositoryBundleClassLoader cl = depcl.classLoader;
-			if (!triedcls.add(cl.bundleKey)) {
+			if (!triedcls.add(cl)) {
 				continue;
 			}
 			NestRepositoryBundleClassLoader nestcl = cl;
