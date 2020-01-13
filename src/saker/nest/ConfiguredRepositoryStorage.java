@@ -986,9 +986,6 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 				return presentcl;
 			}
 
-			Map<ClassLoaderDomain, NestRepositoryBundleClassLoader> constructeddomaincls = new HashMap<>();
-			Map<ClassLoaderDomain, Map<BundleKey, DependentClassLoader>> constructedcldependencies = new HashMap<>();
-
 			ClassLoaderDomain rootbundledomain = createClassLoaderDomain(bundlekey, domainsatisfied);
 			{
 				NestRepositoryBundleClassLoader presentdomaincl = domainClassLoaders.get(rootbundledomain);
@@ -998,9 +995,16 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 					return presentdomaincl;
 				}
 			}
+
+			Map<ClassLoaderDomain, NestRepositoryBundleClassLoader> constructeddomaincls = new HashMap<>();
+			Map<ClassLoaderDomain, Map<BundleKey, DependentClassLoader>> constructedcldependencies = new HashMap<>();
 			for (ClassLoaderDomain domain : rootbundledomain.getAllDomains()) {
 				NestRepositoryBundleClassLoader presentdomaincl = domainClassLoaders.get(domain);
 				if (presentdomaincl != null) {
+					continue;
+				}
+				if (constructeddomaincls.containsKey(domain)) {
+					//already constructed
 					continue;
 				}
 				StorageViewKey storageviewkey = domain.bundle.getStorageViewKey();
@@ -1110,7 +1114,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			DependencyDomainResolutionResult<BundleKey, BC> dependencies,
 			Map<Entry<DependencyDomainResolutionResult<BundleKey, BC>, BundleKey>, ClassLoaderDomain> constructeddomains) {
 		Entry<DependencyDomainResolutionResult<BundleKey, BC>, BundleKey> lookupentry = ImmutableUtils
-				.makeImmutableMapEntry(enclosingdomain, enclosingbundleid);
+				.makeImmutableMapEntry(dependencies, enclosingbundleid);
 		ClassLoaderDomain presentdomain = constructeddomains.get(lookupentry);
 		if (presentdomain != null) {
 			return presentdomain;
@@ -1262,6 +1266,33 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			return true;
 		}
 
+		private void toString(StringBuilder sb, Set<ClassLoaderDomain> added) {
+			if (!added.add(this)) {
+				sb.append("<previous ");
+				sb.append(this.bundle.getBundleIdentifier());
+				sb.append("@");
+				sb.append(Integer.toHexString(System.identityHashCode(this)));
+				sb.append(">");
+				return;
+			}
+			sb.append(bundle.getBundleIdentifier());
+			sb.append("@");
+			sb.append(Integer.toHexString(System.identityHashCode(this)));
+			sb.append("{");
+			for (Iterator<? extends Entry<? extends BundleKey, DomainDependency>> it = dependencies.entrySet()
+					.iterator(); it.hasNext();) {
+				Entry<? extends BundleKey, DomainDependency> entry = it.next();
+				if (entry.getValue().privateScope) {
+					sb.append("<private>:");
+				}
+				entry.getValue().domain.toString(sb, added);
+				if (it.hasNext()) {
+					sb.append(", ");
+				}
+			}
+			sb.append("}");
+		}
+
 		@Override
 		public int hashCode() {
 			final int prime = 31;
@@ -1291,18 +1322,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 		@Override
 		public String toString() {
 			StringBuilder sb = new StringBuilder();
-			sb.append(getClass().getSimpleName());
-			sb.append("[bundle=");
-			sb.append(bundle.getBundleIdentifier());
-			sb.append(", dependencies=[");
-			for (Iterator<? extends BundleKey> it = dependencies.keySet().iterator(); it.hasNext();) {
-				BundleKey dep = it.next();
-				sb.append(dep.getBundleIdentifier());
-				if (it.hasNext()) {
-					sb.append(", ");
-				}
-			}
-			sb.append("]]");
+			toString(sb, ObjectUtils.newIdentityHashSet());
 			return sb.toString();
 		}
 

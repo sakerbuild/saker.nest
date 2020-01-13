@@ -334,6 +334,7 @@ test() {
 		TestInvokerParameters: {
 			SakerJarPath: nest.bundle.localize("saker.build-test-v{ static(VERSION_saker.build) }")[BundleLocalPaths][0],
 			TestsBaseBuildDirectory: std.file.mirror.path(std.file.place(test/build)),
+			TimeoutMillis: 120000,
 		},
 		TestClassParameters: {
 			**: {

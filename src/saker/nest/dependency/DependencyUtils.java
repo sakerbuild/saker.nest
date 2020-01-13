@@ -20,6 +20,7 @@ import java.util.ArrayDeque;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -37,6 +38,7 @@ import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import saker.build.thirdparty.saker.util.ImmutableUtils;
+import saker.build.thirdparty.saker.util.ObjectUtils;
 import saker.build.thirdparty.saker.util.StringUtils;
 import saker.build.thirdparty.saker.util.function.Functionals;
 import saker.build.thirdparty.saker.util.function.LazySupplier;
@@ -340,12 +342,13 @@ public class DependencyUtils {
 		return new DependencyDomainResolutionResultImpl<>(basedomain, dependencieslookupcache);
 	}
 
-	private static class DependencyDomainResolutionResultImpl<BK extends BundleIdentifierHolder, BC>
+	private static final class DependencyDomainResolutionResultImpl<BK extends BundleIdentifierHolder, BC>
 			implements DependencyDomainResolutionResult<BK, BC> {
 
-		protected Map<Entry<? extends BK, ? extends BC>, ? extends DependencyDomainResolutionResult<BK, BC>> directDependencies;
+		//immutable linked hash map
+		protected Map<Entry<? extends BK, ? extends BC>, ? extends DependencyDomainResolutionResultImpl<BK, BC>> directDependencies;
 
-		public DependencyDomainResolutionResultImpl() {
+		private DependencyDomainResolutionResultImpl() {
 		}
 
 		public DependencyDomainResolutionResultImpl(DomainResult<BK, BC> basedomain,
@@ -356,15 +359,15 @@ public class DependencyUtils {
 		public DependencyDomainResolutionResultImpl(DomainResult<BK, BC> basedomain,
 				Map<BK, Supplier<BundleDependencyInformation>> dependencieslookupcache,
 				Map<Entry<? extends BK, ? extends BC>, DependencyDomainResolutionResultImpl<BK, BC>> created) {
-			Map<Entry<? extends BK, ? extends BC>, DependencyDomainResolutionResult<BK, BC>> directdependencies = createDirectDependencies(
+			LinkedHashMap<Entry<? extends BK, ? extends BC>, DependencyDomainResolutionResultImpl<BK, BC>> directdependencies = createDirectDependencies(
 					basedomain, dependencieslookupcache, created);
 			this.directDependencies = ImmutableUtils.unmodifiableMap(directdependencies);
 		}
 
-		private static <BK extends BundleIdentifierHolder, BC> Map<Entry<? extends BK, ? extends BC>, DependencyDomainResolutionResult<BK, BC>> createDirectDependencies(
+		private static <BK extends BundleIdentifierHolder, BC> LinkedHashMap<Entry<? extends BK, ? extends BC>, DependencyDomainResolutionResultImpl<BK, BC>> createDirectDependencies(
 				DomainResult<BK, BC> basedomain, Map<BK, Supplier<BundleDependencyInformation>> dependencieslookupcache,
 				Map<Entry<? extends BK, ? extends BC>, DependencyDomainResolutionResultImpl<BK, BC>> created) {
-			Map<Entry<? extends BK, ? extends BC>, DependencyDomainResolutionResult<BK, BC>> directdependencies = new LinkedHashMap<>();
+			LinkedHashMap<Entry<? extends BK, ? extends BC>, DependencyDomainResolutionResultImpl<BK, BC>> directdependencies = new LinkedHashMap<>();
 			BundleDependencyInformation depinfo = dependencieslookupcache.get(basedomain.bundleEntry.getKey()).get();
 
 			for (BundleIdentifier dep : depinfo.getDependencies().keySet()) {
@@ -375,15 +378,16 @@ public class DependencyUtils {
 					continue;
 				}
 
-				DependencyDomainResolutionResultImpl<BK, BC> directdomainres = created.get(depentry.getKey());
+				Entry<? extends BK, ? extends BC> depbundleentry = depentry.getKey();
+				DependencyDomainResolutionResultImpl<BK, BC> directdomainres = created.get(depbundleentry);
 				if (directdomainres == null) {
 					directdomainres = new DependencyDomainResolutionResultImpl<>();
-					created.put(depentry.getKey(), directdomainres);
+					created.put(depbundleentry, directdomainres);
 
 					directdomainres.directDependencies = createDirectDependencies(depentry.getValue(),
 							dependencieslookupcache, created);
 				}
-				directdependencies.put(depentry.getKey(), directdomainres);
+				directdependencies.put(depbundleentry, directdomainres);
 			}
 
 			return directdependencies;
@@ -394,6 +398,97 @@ public class DependencyUtils {
 			return directDependencies;
 		}
 
+		@Override
+		public int hashCode() {
+			//don't do transitive hash code
+			return directDependencies.keySet().hashCode();
+		}
+
+		private boolean equals(DependencyDomainResolutionResultImpl<?, ?> domain,
+				Map<DependencyDomainResolutionResultImpl<?, ?>, DependencyDomainResolutionResultImpl<?, ?>> identitycheckedset) {
+			DependencyDomainResolutionResult<?, ?> prev = identitycheckedset.putIfAbsent(this, domain);
+			if (prev != null) {
+				if (prev != domain) {
+					return false;
+				}
+				return true;
+			}
+			//we need to check
+			if (this.directDependencies.size() != domain.directDependencies.size()) {
+				return false;
+			}
+			Iterator<? extends Entry<? extends Entry<? extends BundleIdentifierHolder, ?>, ? extends DependencyDomainResolutionResultImpl<?, ?>>> thisit = this.directDependencies
+					.entrySet().iterator();
+			Iterator<? extends Entry<? extends Entry<? extends BundleIdentifierHolder, ?>, ? extends DependencyDomainResolutionResultImpl<?, ?>>> dit = domain.directDependencies
+					.entrySet().iterator();
+			while (thisit.hasNext()) {
+				if (!dit.hasNext()) {
+					return false;
+				}
+				Entry<? extends Entry<? extends BundleIdentifierHolder, ?>, ? extends DependencyDomainResolutionResultImpl<?, ?>> thisentry = thisit
+						.next();
+				Entry<? extends Entry<? extends BundleIdentifierHolder, ?>, ? extends DependencyDomainResolutionResultImpl<?, ?>> dentry = dit
+						.next();
+				if (!thisentry.getKey().equals(dentry.getKey())) {
+					return false;
+				}
+				DependencyDomainResolutionResultImpl<?, ?> thisdomain = thisentry.getValue();
+				DependencyDomainResolutionResultImpl<?, ?> ddomain = dentry.getValue();
+				if (!thisdomain.equals(ddomain, identitycheckedset)) {
+					return false;
+				}
+			}
+			if (dit.hasNext()) {
+				return false;
+			}
+			return true;
+		}
+
+		@Override
+		public boolean equals(Object obj) {
+			if (this == obj)
+				return true;
+			if (obj == null)
+				return false;
+			if (getClass() != obj.getClass())
+				return false;
+			DependencyDomainResolutionResultImpl<?, ?> other = (DependencyDomainResolutionResultImpl<?, ?>) obj;
+			if (!this.equals(other, new IdentityHashMap<>())) {
+				return false;
+			}
+			return true;
+		}
+
+		protected void toString(StringBuilder sb, Set<DependencyDomainResolutionResultImpl<BK, BC>> added) {
+			if (!added.add(this)) {
+				sb.append("<previous @");
+				sb.append(Integer.toHexString(System.identityHashCode(this)));
+				sb.append(">");
+				return;
+			}
+			sb.append('@');
+			sb.append(Integer.toHexString(System.identityHashCode(this)));
+			sb.append("{");
+			for (Iterator<? extends Entry<Entry<? extends BK, ? extends BC>, ? extends DependencyDomainResolutionResultImpl<BK, BC>>> it = directDependencies
+					.entrySet().iterator(); it.hasNext();) {
+				Entry<Entry<? extends BK, ? extends BC>, ? extends DependencyDomainResolutionResultImpl<BK, BC>> entry = it
+						.next();
+				sb.append(entry.getKey().getKey().getBundleIdentifier());
+				sb.append(": ");
+				entry.getValue().toString(sb, added);
+				if (it.hasNext()) {
+					sb.append(", ");
+				}
+			}
+			sb.append("}");
+		}
+
+		@Override
+		public String toString() {
+			StringBuilder sb = new StringBuilder();
+			toString(sb, ObjectUtils.newIdentityHashSet());
+			return sb.toString();
+		}
 	}
 
 	private static class RandomHolder {
