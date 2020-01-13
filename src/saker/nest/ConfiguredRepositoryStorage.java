@@ -902,6 +902,13 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 				return false;
 			return true;
 		}
+
+		@Override
+		public String toString() {
+			return "ClassLoaderDependencyResolutionBundleContext["
+					+ (storageView != null ? "storageView=" + storageView + ", " : "")
+					+ (relativeLookup != null ? "relativeLookup=" + relativeLookup : "") + "]";
+		}
 	}
 
 	private NestRepositoryBundleClassLoader getBundleClassLoader(AbstractNestRepositoryBundle bundle,

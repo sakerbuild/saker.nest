@@ -306,7 +306,7 @@ test() {
 		AbortOnFail: true,
 		Verbose: true,
 	)
-	
+
 	$integrationtest = saker.java.test(
 		TestRunnerClassPath: [
 			saker.java.classpath.bundle("saker.build-test-runner-v{ static(VERSION_saker.build) }"),
@@ -351,6 +351,7 @@ test() {
 		AbortOnFail: true,
 		Verbose: true,
 	)
+
 }
 
 

@@ -239,14 +239,13 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 
 		//the test from the related issue: https://github.com/sakerbuild/saker.nest/issues/5
 		lookup()//
-				.bundle("first.bundle-v1").depend("common.bundle", "1.0").depend("dependent.bundle", "1.0").build()//
-				.bundle("dependent.bundle-v1.0").dependPrivate("common.bundle", "[1, 3.0]").build()//
-				.bundle("common.bundle-v1.0").build()//
-				.bundle("common.bundle-v2.0").build()//
-				.bundle("common.bundle-v3.0").build()//
+				.bundle("a-v1").depend("c", "1").depend("b", "1").build()//
+				.bundle("b-v1").dependPrivate("c", "[1, 3]").build()//
+				.bundle("c-v1").build()//
+				.bundle("c-v2").build()//
+				.bundle("c-v3").build()//
 
-				.assertSatisfiable("first.bundle-v1", "common.bundle-v1.0", "dependent.bundle-v1.0",
-						"common.bundle-v3.0")//
+				.assertSatisfiable("a-v1", "c-v1", "b-v1", "c-v3")//
 		;
 
 		//circular private
@@ -259,6 +258,22 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				.assertSatisfiable("third.bundle-v1.0", "first.bundle-v1", "second.bundle-v1.0")//
 		;
 
+		//alternating circular private
+		lookup()//
+				.bundle("a-v1").depend("x", "1").build()//
+				.bundle("x-v1").dependPrivate("b", "1").build()//
+				.bundle("b-v1").depend("y", "1").build()//
+				.bundle("y-v1").dependPrivate("c", "1").build()//
+				.bundle("c-v1").depend("z", "1").build()//
+				.bundle("z-v1").dependPrivate("a", "1").build()//
+				.assertSatisfiable("a-v1", "x-v1", "b-v1", "y-v1", "c-v1", "z-v1")//
+				.assertSatisfiable("x-v1", "b-v1", "y-v1", "c-v1", "z-v1", "a-v1")//
+				.assertSatisfiable("b-v1", "y-v1", "c-v1", "z-v1", "a-v1", "x-v1")//
+				.assertSatisfiable("y-v1", "c-v1", "z-v1", "a-v1", "x-v1", "b-v1")//
+				.assertSatisfiable("c-v1", "z-v1", "a-v1", "x-v1", "b-v1", "y-v1")//
+				.assertSatisfiable("z-v1", "a-v1", "x-v1", "b-v1", "y-v1", "c-v1")//
+		;
+
 		//satisfy optionals of private dependencies
 		lookup()//
 				.bundle("first-v1").dependPrivate("dep", "1").build()//
@@ -269,13 +284,13 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				.assertSatisfiable("first-v1", "dep-v1", "opt-v1")//
 		;
 
-		//check that outside pinned bundle won't affect private resolution
+		//check that outside pinned bundle affects private resolution
 		lookup()//
 				.bundle("first-v1").depend("opt", "1").dependPrivate("dep", "1").build()//
 				.bundle("dep-v1").dependOptional("opt", "2").build()//
 				.bundle("opt-v1").build()//
 				.bundle("opt-v2").build()//
-				.assertSatisfiable("first-v1", "opt-v1", "dep-v1", "opt-v2")//
+				.assertSatisfiable("first-v1", "opt-v1", "dep-v1")//
 		;
 		//the non-private version shouldn't include v2
 		lookup()//
@@ -293,13 +308,12 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				.bundle("opt-v2").build()//
 				.assertNotSatisfiable("first-v1")//
 		;
-		//the private only version should succeed as well
 		lookup()//
 				.bundle("first-v1").depend("opt", "1").dependPrivate("dep", "1").build()//
 				.bundle("dep-v1").depend("opt", "2").build()//
 				.bundle("opt-v1").build()//
 				.bundle("opt-v2").build()//
-				.assertSatisfiable("first-v1", "opt-v1", "dep-v1", "opt-v2")//
+				.assertNotSatisfiable("first-v1")//
 		;
 
 		lookup()//
@@ -323,8 +337,10 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				.bundle("dep-v1").dependOptional("opt", "2").build()//
 				.assertSatisfiable("bundle-v1", "dep-v1")//
 
-				.bundle("opt-v1").build().assertSatisfiable("bundle-v1", "dep-v1", "opt-v1")//
-				.bundle("opt-v2").build().assertSatisfiable("bundle-v1", "dep-v1", "opt-v1", "opt-v2")//
+				.bundle("opt-v1").build()//
+				.assertSatisfiable("bundle-v1", "dep-v1", "opt-v1")//
+				.bundle("opt-v2").build()//
+				.assertSatisfiable("bundle-v1", "dep-v1", "opt-v1")//
 		;
 
 		lookup()//
@@ -337,6 +353,17 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 		;
 
 		lookup()//
+				.bundle("a-v1").depend("b", "1").depend("d", "2").build()//
+				.bundle("b-v1").depend("c", "1").build()//
+				.bundle("b-v2").depend("c", "1").build()//
+				.bundle("c-v1").dependPrivate("d", "1").build()//
+				.bundle("d-v1").depend("b", "1").build()//
+				.bundle("d-v2").build()//
+				.assertSatisfiable("a-v1", "b-v1", "d-v2", "c-v1", "d-v1")//
+		;
+
+		//DifferentDomainPrivateDependencyTest with invalid
+		lookup()//
 				.bundle("a-v1").dependPrivate("b", "1").dependPrivate("c", "1").build()//
 				.bundle("b-v1").depend("x", "1").depend("d", "2").build()//
 				.bundle("c-v1").depend("x", "1").depend("d", "1").build()//
@@ -345,8 +372,20 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				.bundle("x-v1").depend("d", "[1, 2]").build()//
 				.assertSatisfiable("b-v1", "x-v1", "d-v2")//
 				.assertSatisfiable("c-v1", "x-v1", "d-v1")//
+				.assertNotSatisfiable("a-v1")//
+		;
+		System.out.println("DifferentDomainPrivateDependencyTest");
+		//DifferentDomainPrivateDependencyTest with valid
+		lookup()//
+				.bundle("a-v1").depend("b", "1").depend("c", "1").build()//
+				.bundle("b-v1").dependPrivate("x", "1").dependPrivate("d", "2").build()//
+				.bundle("c-v1").dependPrivate("x", "1").dependPrivate("d", "1").build()//
+				.bundle("d-v1").build()//
+				.bundle("d-v2").build()//
+				.bundle("x-v1").depend("d", "[1, 2]").build()//
+				.assertSatisfiable("b-v1", "x-v1", "d-v2")//
+				.assertSatisfiable("c-v1", "x-v1", "d-v1")//
 				.assertSatisfiable("a-v1", "b-v1", "c-v1", "x-v1", "d-v2", "d-v1")//
-
 		;
 
 		lookup()//
@@ -380,12 +419,36 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 
 		lookup()//
 				.bundle("a-v1").depend("p", "1").dependPrivate("b", "1").build()//
-				.bundle("b-v1").depend("p", "2").dependPrivate("c", "1").build()//
-				.bundle("c-v1").depend("p", "3").build()//
+				.bundle("b-v1").depend("p", "[1, 2]").dependPrivate("c", "1").build()//
+				.bundle("c-v1").depend("p", "[1, 3]").build()//
 				.bundle("p-v1").build()//
 				.bundle("p-v2").build()//
 				.bundle("p-v3").build()//
-				.assertSatisfiable("a-v1", "p-v1", "b-v1", "p-v2", "c-v1", "p-v3")//
+				.assertSatisfiable("a-v1", "p-v1", "b-v1", "c-v1")//
+		;
+
+		lookup()//
+				.bundle("a-v1").depend("b", "1").dependPrivate("p", "[1,2]").build()//
+				.bundle("b-v1").depend("p", "2").build()//
+				.bundle("p-v1").build()//
+				.bundle("p-v2").build()//
+				.assertSatisfiable("a-v1", "b-v1", "p-v2")//
+		;
+
+		lookup()//
+				.bundle("a-v1").depend("b", "1").dependPrivate("p", "1").build()//
+				.bundle("b-v1").depend("p", "2").build()//
+				.bundle("p-v1").build()//
+				.bundle("p-v2").build()//
+				.assertNotSatisfiable("a-v1")//
+		;
+
+		lookup()//
+				.bundle("a-v1").depend("b", "1").dependPrivate("p", "1").build()//
+				.bundle("b-v1").dependPrivate("p", "2").build()//
+				.bundle("p-v1").build()//
+				.bundle("p-v2").build()//
+				.assertSatisfiable("a-v1", "b-v1", "p-v1", "p-v2")//
 		;
 	}
 
@@ -414,6 +477,7 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 		public LookupContext assertSatisfiable(String bundleid, String... expectedbundles) {
 			DependencyDomainResolutionResult<?, ?> satisfied = satisfy(bundleid);
 			assertNonNull(satisfied, "Failed to satisfy: " + bundleid);
+			printSatisfiedDomain(satisfied);
 			Set<BundleIdentifier> bundleidset = bundleIdSetOf(bundleid, expectedbundles);
 
 			assertResults(satisfied, bundleidset, getBaseBundleEntry(BundleIdentifier.valueOf(bundleid)));
@@ -423,7 +487,7 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				assertNonNull(satisfiedold, "Failed to satisfy: " + bundleid);
 				assertResultsOld(satisfiedold, bundleidset, getBaseBundleEntry(BundleIdentifier.valueOf(bundleid)));
 			} catch (UnsupportedOperationException e) {
-				System.err.println(e);
+				System.out.println(e);
 			}
 
 			return this;
@@ -489,6 +553,7 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 		public LookupContext assertMultiSatisfiable(String[] bundleids, String[] expectedbundles) {
 			DependencyDomainResolutionResult<?, ?> satisfied = satisfyMultiple(bundleids);
 			assertNonNull(satisfied, "Failed to satisfy: " + Arrays.toString(bundleids));
+			printSatisfiedDomain(satisfied);
 			Set<BundleIdentifier> bundleidset = bundleIdSetOf(PSEUDO_BASE_BUNDLE_ID.toString(), expectedbundles);
 
 			assertResults(satisfied, bundleidset, getBaseBundleEntry(PSEUDO_BASE_BUNDLE_ID));
@@ -498,7 +563,7 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				assertNonNull(satisfiedold, "Failed to satisfy: " + Arrays.toString(bundleids));
 				assertResultsOld(satisfiedold, bundleidset, getBaseBundleEntry(PSEUDO_BASE_BUNDLE_ID));
 			} catch (UnsupportedOperationException e) {
-				System.err.println(e);
+				System.out.println(e);
 			}
 
 			return this;
@@ -706,6 +771,56 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				return LookupContext.this;
 			}
 
+		}
+
+		private static void printSatisfiedDomain(DependencyDomainResolutionResult<?, ?> satisfied) {
+			String str = satisfied.toString();
+			StringBuilder sb = new StringBuilder();
+			int len = str.length();
+			String tab = "";
+			for (int i = 0; i < len; i++) {
+				char c = str.charAt(i);
+				if (c == '}') {
+					tab = tab.substring(0, tab.length() - 4);
+					sb.append('\n');
+					sb.append(tab);
+					sb.append('}');
+					if (i + 1 < len) {
+						char n = str.charAt(i + 1);
+						if (n == ',') {
+							++i;
+							if (str.charAt(i + 1) == ' ') {
+								++i;
+							}
+							sb.append(',');
+							sb.append('\n');
+							sb.append(tab);
+							continue;
+						}
+					}
+				} else if (c == '{') {
+					if (str.charAt(i + 1) == '}') {
+						sb.append('{');
+						sb.append('}');
+						++i;
+						continue;
+					}
+					tab += "    ";
+					sb.append('{');
+					sb.append('\n');
+					sb.append(tab);
+				} else if (c == ',') {
+					if (str.charAt(i + 1) == ' ') {
+						++i;
+					}
+					sb.append(',');
+					sb.append('\n');
+					sb.append(tab);
+				} else {
+					sb.append(c);
+				}
+			}
+			System.out.println(sb);
 		}
 	}
 
