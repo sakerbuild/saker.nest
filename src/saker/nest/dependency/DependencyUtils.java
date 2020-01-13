@@ -969,10 +969,7 @@ public class DependencyUtils {
 			DomainResult<BK, BC> result = new DomainResult<>(bundleEntry);
 			result.pinParent = null;
 			result.pinContext = new HashMap<>();
-			result.pinContext.put(
-					ImmutableUtils.makeImmutableMapEntry(
-							bundleEntry.getKey().getBundleIdentifier().withoutMetaQualifiers(), bundleEntry.getValue()),
-					result);
+			result.pinContext.put(versionlessBundleEntry(bundleEntry), result);
 			return result;
 		}
 

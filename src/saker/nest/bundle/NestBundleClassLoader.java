@@ -73,7 +73,10 @@ public interface NestBundleClassLoader {
 	 * The resulting map contains <b>direct</b> dependencies of this bundle, with optional classpath dependencies
 	 * included if possible.
 	 * <p>
-	 * Transitive dependencies are not included.
+	 * The result also contains the {@linkplain BundleInformation#DEPENDENCY_META_PRIVATE private} dependencies as well,
+	 * however, it doesn't tell you if a dependency was included through a private dependency or not.
+	 * <p>
+	 * Transitive dependencies are not included, only the direct ones.
 	 * <p>
 	 * The result of this method is the classpath dependencies that were resolved by the Nest repository when this class
 	 * loader was constructed. The classes loaded by this class loader have the classes accessible through the returned

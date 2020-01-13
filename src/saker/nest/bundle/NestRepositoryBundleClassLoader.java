@@ -33,6 +33,7 @@ import java.util.UUID;
 
 import saker.build.thirdparty.saker.util.ImmutableUtils;
 import saker.build.thirdparty.saker.util.StringUtils;
+import saker.build.thirdparty.saker.util.TransformingMap;
 import saker.build.thirdparty.saker.util.classloader.MultiClassLoader;
 import saker.build.thirdparty.saker.util.classloader.MultiDataClassLoader;
 import saker.build.thirdparty.saker.util.function.LazySupplier;
@@ -45,6 +46,17 @@ import saker.nest.NestRepositoryImpl;
 import saker.nest.bundle.lookup.BundleLookup;
 
 public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader implements NestBundleClassLoader {
+
+	public static final class DependentClassLoader {
+		protected final NestRepositoryBundleClassLoader classLoader;
+		protected final boolean privateScope;
+
+		public DependentClassLoader(NestRepositoryBundleClassLoader classLoader, boolean privateScope) {
+			this.classLoader = classLoader;
+			this.privateScope = privateScope;
+		}
+	}
+
 	static {
 		registerAsParallelCapable();
 	}
@@ -57,12 +69,12 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 	/**
 	 * Unmodifiable map of dependency class loaders.
 	 */
-	private final Map<BundleKey, NestRepositoryBundleClassLoader> dependencyClassLoaders;
+	private final Map<BundleKey, DependentClassLoader> dependencyClassLoaders;
 	private final LazySupplier<byte[]> hashWithClassPathDependencies;
 	private final BundleLookup relativeBundleLookup;
 
 	public NestRepositoryBundleClassLoader(ConfiguredRepositoryStorage configuredStorage, BundleKey bundlekey,
-			AbstractNestRepositoryBundle bundle, Map<BundleKey, NestRepositoryBundleClassLoader> dependencyClassLoaders,
+			AbstractNestRepositoryBundle bundle, Map<BundleKey, DependentClassLoader> dependencyClassLoaders,
 			BundleLookup relativeBundleLookup) {
 		super(createAppropriateParentClassLoader(bundle), new NestBundleClassLoaderDataFinder(bundle));
 		this.configuredStorage = configuredStorage;
@@ -95,7 +107,15 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 
 	@Override
 	public Map<? extends BundleKey, ? extends NestBundleClassLoader> getClassPathDependencies() {
-		return dependencyClassLoaders;
+		return ImmutableUtils.makeImmutableLinkedHashMap(
+				new TransformingMap<BundleKey, DependentClassLoader, BundleKey, NestBundleClassLoader>(
+						dependencyClassLoaders) {
+					@Override
+					protected Entry<BundleKey, NestBundleClassLoader> transformEntry(BundleKey key,
+							DependentClassLoader value) {
+						return ImmutableUtils.makeImmutableMapEntry(key, value.classLoader);
+					}
+				});
 	}
 
 	@Override
@@ -140,7 +160,7 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 		if (c == null) {
 			Set<BundleKey> triedcls = new HashSet<>();
 			triedcls.add(this.bundleKey);
-			c = findClassRecursively(triedcls, name, e);
+			c = findClassRecursively(triedcls, name, e, true);
 		}
 		if (c != null) {
 			if (resolve) {
@@ -207,14 +227,19 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 				e.addSuppressed(e2);
 			}
 		}
-		return findClassRecursively(triedcls, name, e);
+		return findClassRecursively(triedcls, name, e, false);
 	}
 
-	private Class<?> findClassRecursively(Set<BundleKey> triedcls, String name, ClassNotFoundException e) {
+	private Class<?> findClassRecursively(Set<BundleKey> triedcls, String name, ClassNotFoundException e,
+			boolean allowprivate) {
 		if (dependencyClassLoaders.isEmpty()) {
 			return null;
 		}
-		for (NestRepositoryBundleClassLoader cl : dependencyClassLoaders.values()) {
+		for (DependentClassLoader depcl : dependencyClassLoaders.values()) {
+			if (depcl.privateScope && !allowprivate) {
+				continue;
+			}
+			NestRepositoryBundleClassLoader cl = depcl.classLoader;
 			if (!triedcls.add(cl.bundleKey)) {
 				continue;
 			}
@@ -329,10 +354,10 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 			//already added
 			return;
 		}
-		Map<? extends BundleKey, NestRepositoryBundleClassLoader> deps = cl.dependencyClassLoaders;
+		Map<BundleKey, DependentClassLoader> deps = cl.dependencyClassLoaders;
 		if (!deps.isEmpty()) {
-			for (NestRepositoryBundleClassLoader depcl : deps.values()) {
-				collectBundleHashesImpl(depcl, result);
+			for (DependentClassLoader depcl : deps.values()) {
+				collectBundleHashesImpl(depcl.classLoader, result);
 			}
 		}
 	}
