@@ -17,7 +17,9 @@ package saker.nest.dependency;
 
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.function.BiFunction;
 
+import saker.nest.bundle.BundleDependencyInformation;
 import saker.nest.bundle.BundleIdentifier;
 import saker.nest.bundle.BundleIdentifierHolder;
 
@@ -31,7 +33,10 @@ import saker.nest.bundle.BundleIdentifierHolder;
  * @param <BC>The
  *            bundle context type used during resolution.
  * @see DependencyUtils#satisfyDependencyRequirements
+ * @deprecated Use {@link DependencyUtils#satisfyDependencyDomain(BundleIdentifierHolder, Object, BundleDependencyInformation, BiFunction, BiFunction, DependencyResolutionLogger)
+ *                 DependencyUtils.satisfyDependencyDomain} instead.
  */
+@Deprecated
 public interface DependencyResolutionResult<BK extends BundleIdentifierHolder, BC> {
 	/**
 	 * Gets the dependency resolution result with undetermined iteration order.

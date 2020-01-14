@@ -29,6 +29,7 @@ import testing.saker.build.tests.TestUtils;
 import testing.saker.nest.util.NestIntegrationTestUtils;
 
 @SakerTest
+@SuppressWarnings("unused")
 public class CircularDependencyMainActionTest extends ManualLoadedRepositoryTestCase {
 	//just a random uuid
 	private static final String PROPERTY_NAME = "b2ed83b1-b7e5-4888-9253-5135d391d7a5";

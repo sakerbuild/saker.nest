@@ -30,9 +30,11 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentSkipListMap;
 
 import saker.build.thirdparty.saker.util.ImmutableUtils;
 import saker.build.thirdparty.saker.util.StringUtils;
+import saker.build.thirdparty.saker.util.TransformingMap;
 import saker.build.thirdparty.saker.util.classloader.MultiClassLoader;
 import saker.build.thirdparty.saker.util.classloader.MultiDataClassLoader;
 import saker.build.thirdparty.saker.util.function.LazySupplier;
@@ -45,6 +47,17 @@ import saker.nest.NestRepositoryImpl;
 import saker.nest.bundle.lookup.BundleLookup;
 
 public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader implements NestBundleClassLoader {
+
+	public static final class DependentClassLoader {
+		protected final NestRepositoryBundleClassLoader classLoader;
+		protected final boolean privateScope;
+
+		public DependentClassLoader(NestRepositoryBundleClassLoader classLoader, boolean privateScope) {
+			this.classLoader = classLoader;
+			this.privateScope = privateScope;
+		}
+	}
+
 	static {
 		registerAsParallelCapable();
 	}
@@ -57,12 +70,14 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 	/**
 	 * Unmodifiable map of dependency class loaders.
 	 */
-	private final Map<BundleKey, NestRepositoryBundleClassLoader> dependencyClassLoaders;
+	private final Map<BundleKey, DependentClassLoader> dependencyClassLoaders;
 	private final LazySupplier<byte[]> hashWithClassPathDependencies;
 	private final BundleLookup relativeBundleLookup;
 
+	private final ConcurrentSkipListMap<String, Class<?>> bundleLoadedClasses = new ConcurrentSkipListMap<>();
+
 	public NestRepositoryBundleClassLoader(ConfiguredRepositoryStorage configuredStorage, BundleKey bundlekey,
-			AbstractNestRepositoryBundle bundle, Map<BundleKey, NestRepositoryBundleClassLoader> dependencyClassLoaders,
+			AbstractNestRepositoryBundle bundle, Map<BundleKey, DependentClassLoader> dependencyClassLoaders,
 			BundleLookup relativeBundleLookup) {
 		super(createAppropriateParentClassLoader(bundle), new NestBundleClassLoaderDataFinder(bundle));
 		this.configuredStorage = configuredStorage;
@@ -95,7 +110,15 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 
 	@Override
 	public Map<? extends BundleKey, ? extends NestBundleClassLoader> getClassPathDependencies() {
-		return dependencyClassLoaders;
+		return ImmutableUtils.makeImmutableLinkedHashMap(
+				new TransformingMap<BundleKey, DependentClassLoader, BundleKey, NestBundleClassLoader>(
+						dependencyClassLoaders) {
+					@Override
+					protected Entry<BundleKey, NestBundleClassLoader> transformEntry(BundleKey key,
+							DependentClassLoader value) {
+						return ImmutableUtils.makeImmutableMapEntry(key, value.classLoader);
+					}
+				});
 	}
 
 	@Override
@@ -107,15 +130,34 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 		return hashWithClassPathDependencies.get();
 	}
 
+	/**
+	 * Must be locked on {@link #getClassLoadingLock(String)}.
+	 * <p>
+	 * We can't use {@link #findLoadedClass(String)} as that may return classes that weren't defined by this
+	 * classloader.
+	 */
+	private Class<?> getAlreadyLoadedClassByThisBundle(String name) {
+		return bundleLoadedClasses.get(name);
+	}
+
 	//doc: this method doesn't search any classpath bundles, only the current one
 	public Class<?> loadClassFromBundle(String name) throws ClassNotFoundException {
 		synchronized (getClassLoadingLock(name)) {
-			Class<?> c = findLoadedClass(name);
+			Class<?> c = getAlreadyLoadedClassByThisBundle(name);
 			if (c != null) {
 				return c;
 			}
-			return super.findClass(name);
+			return loadDefineClassFromBundle(name);
 		}
+	}
+
+	/**
+	 * Must be locked on {@link #getClassLoadingLock(String)}.
+	 */
+	private Class<?> loadDefineClassFromBundle(String name) throws ClassNotFoundException {
+		Class<?> result = super.findClass(name);
+		bundleLoadedClasses.put(name, result);
+		return result;
 	}
 
 	@Override
@@ -123,14 +165,14 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 		ClassNotFoundException e = null;
 		Class<?> c;
 		synchronized (getClassLoadingLock(name)) {
-			c = findLoadedClass(name);
+			c = getAlreadyLoadedClassByThisBundle(name);
 			if (c == null) {
 				try {
 					c = Class.forName(name, false, getParent());
 				} catch (ClassNotFoundException e2) {
 					e = IOUtils.addExc(e, e2);
 					try {
-						c = super.findClass(name);
+						c = loadDefineClassFromBundle(name);
 					} catch (ClassNotFoundException e3) {
 						e = IOUtils.addExc(e, e3);
 					}
@@ -138,9 +180,9 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 			}
 		}
 		if (c == null) {
-			Set<BundleKey> triedcls = new HashSet<>();
-			triedcls.add(this.bundleKey);
-			c = findClassRecursively(triedcls, name, e);
+			Set<NestBundleClassLoader> triedcls = new HashSet<>();
+			triedcls.add(this);
+			c = findClassRecursively(triedcls, name, e, true);
 		}
 		if (c != null) {
 			if (resolve) {
@@ -184,10 +226,10 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 		return null;
 	}
 
-	private Class<?> loadClassRecursively(Set<BundleKey> triedcls, String name, ClassNotFoundException e) {
+	private Class<?> loadClassRecursively(Set<NestBundleClassLoader> triedcls, String name, ClassNotFoundException e) {
 		// First, check if the class has already been loaded
 		synchronized (getClassLoadingLock(name)) {
-			Class<?> c = findLoadedClass(name);
+			Class<?> c = getAlreadyLoadedClassByThisBundle(name);
 			if (c != null) {
 				return c;
 			}
@@ -202,20 +244,25 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 			// If still not found, then invoke findClass in order
 			// to find the class.
 			try {
-				return super.findClass(name);
+				return loadDefineClassFromBundle(name);
 			} catch (ClassNotFoundException e2) {
 				e.addSuppressed(e2);
 			}
 		}
-		return findClassRecursively(triedcls, name, e);
+		return findClassRecursively(triedcls, name, e, false);
 	}
 
-	private Class<?> findClassRecursively(Set<BundleKey> triedcls, String name, ClassNotFoundException e) {
+	private Class<?> findClassRecursively(Set<NestBundleClassLoader> triedcls, String name, ClassNotFoundException e,
+			boolean allowprivate) {
 		if (dependencyClassLoaders.isEmpty()) {
 			return null;
 		}
-		for (NestRepositoryBundleClassLoader cl : dependencyClassLoaders.values()) {
-			if (!triedcls.add(cl.bundleKey)) {
+		for (DependentClassLoader depcl : dependencyClassLoaders.values()) {
+			if (depcl.privateScope && !allowprivate) {
+				continue;
+			}
+			NestRepositoryBundleClassLoader cl = depcl.classLoader;
+			if (!triedcls.add(cl)) {
 				continue;
 			}
 			NestRepositoryBundleClassLoader nestcl = cl;
@@ -329,10 +376,10 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 			//already added
 			return;
 		}
-		Map<? extends BundleKey, NestRepositoryBundleClassLoader> deps = cl.dependencyClassLoaders;
+		Map<BundleKey, DependentClassLoader> deps = cl.dependencyClassLoaders;
 		if (!deps.isEmpty()) {
-			for (NestRepositoryBundleClassLoader depcl : deps.values()) {
-				collectBundleHashesImpl(depcl, result);
+			for (DependentClassLoader depcl : deps.values()) {
+				collectBundleHashesImpl(depcl.classLoader, result);
 			}
 		}
 	}

@@ -1,0 +1,3 @@
+simple.bundle
+	classpath: 1
+		private: true

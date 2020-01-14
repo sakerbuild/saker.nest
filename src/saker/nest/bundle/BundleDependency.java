@@ -124,10 +124,23 @@ public final class BundleDependency implements Externalizable {
 	 * Checks if the dependency contains the <code>optional</code> meta-data and is associated with a <code>true</code>
 	 * boolean value.
 	 * 
-	 * @return <code>true</code> if the dependency was declared to be optional in the meta-datas.s
+	 * @return <code>true</code> if the dependency was declared to be optional in the meta-datas.
+	 * @see BundleInformation#DEPENDENCY_META_OPTIONAL
 	 */
 	public boolean isOptional() {
 		return Boolean.parseBoolean(metaData.get(BundleInformation.DEPENDENCY_META_OPTIONAL));
+	}
+
+	/**
+	 * Checks if the dependency contains the <code>private</code> meta-data and is associated with a <code>true</code>
+	 * boolean value.
+	 * 
+	 * @return <code>true</code> if the dependency was declared to be private in the meta-datas.
+	 * @see BundleInformation#DEPENDENCY_META_PRIVATE
+	 * @since saker.nest 0.8.1
+	 */
+	public boolean isPrivate() {
+		return Boolean.parseBoolean(metaData.get(BundleInformation.DEPENDENCY_META_PRIVATE));
 	}
 
 	@Override

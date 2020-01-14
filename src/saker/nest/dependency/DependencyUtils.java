@@ -16,17 +16,20 @@
 package saker.nest.dependency;
 
 import java.security.SecureRandom;
-import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
-import java.util.LinkedList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
@@ -35,9 +38,11 @@ import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import saker.build.thirdparty.saker.util.ImmutableUtils;
+import saker.build.thirdparty.saker.util.ObjectUtils;
 import saker.build.thirdparty.saker.util.StringUtils;
 import saker.build.thirdparty.saker.util.function.Functionals;
 import saker.build.thirdparty.saker.util.function.LazySupplier;
+import saker.nest.ConfiguredRepositoryStorage;
 import saker.nest.bundle.BundleDependency;
 import saker.nest.bundle.BundleDependencyInformation;
 import saker.nest.bundle.BundleDependencyList;
@@ -48,7 +53,9 @@ import saker.nest.bundle.BundleKey;
 import saker.nest.bundle.DependencyConstraintConfiguration;
 import saker.nest.bundle.lookup.BundleLookup;
 import saker.nest.exc.InvalidNestBundleException;
+import saker.nest.meta.Versions;
 import saker.nest.version.VersionRange;
+import testing.saker.nest.TestFlag;
 
 /**
  * Utility class providing functionality for working with dependencies.
@@ -131,8 +138,118 @@ public class DependencyUtils {
 	 * @throws IllegalArgumentException
 	 *             If the base bundle identifier doesn't have a {@linkplain BundleIdentifier#getVersionQualifier()
 	 *             version qualifier}.
+	 * @throws UnsupportedOperationException
+	 *             If any of the bundle dependencies contain private dependencies. Use
+	 *             {@link DependencyUtils#satisfyDependencyDomain(BundleIdentifierHolder, Object, BundleDependencyInformation, BiFunction, BiFunction, DependencyResolutionLogger)
+	 *             DependencyUtils.satisfyDependencyDomain} to resolve private dependencies.
+	 * @deprecated Use {@link DependencyUtils#satisfyDependencyDomain(BundleIdentifierHolder, Object, BundleDependencyInformation, BiFunction, BiFunction, DependencyResolutionLogger)
+	 *                 DependencyUtils.satisfyDependencyDomain} instead.
 	 */
+	@Deprecated
 	public static <BK extends BundleIdentifierHolder, BC> DependencyResolutionResult<BK, BC> satisfyDependencyRequirements(
+			BK basebundle, BC basebundlecontext, BundleDependencyInformation basedependencyinfo,
+			BiFunction<? super BundleIdentifier, ? super BC, ? extends Iterable<? extends Entry<? extends BK, ? extends BC>>> bundleslookupfunction,
+			BiFunction<? super BK, ? super BC, ? extends BundleDependencyInformation> bundledependencieslookupfunction,
+			DependencyResolutionLogger<? super BC> logger)
+			throws NullPointerException, IllegalArgumentException, UnsupportedOperationException {
+		if (((querySpecialDependendyFlags(basedependencyinfo) & SPECIAL_PRIVATE) == SPECIAL_PRIVATE)) {
+			throw new UnsupportedOperationException(
+					"Private dependencies are not supported in this version: " + Versions.VERSION_STRING_FULL);
+		}
+		DependencyDomainResolutionResult<BK, BC> satisfied = satisfyDependencyDomain(basebundle, basebundlecontext,
+				basedependencyinfo, bundleslookupfunction, (t, u) -> {
+					BundleDependencyInformation r = bundledependencieslookupfunction.apply(t, u);
+					if (r != null && ((querySpecialDependendyFlags(r) & SPECIAL_PRIVATE) == SPECIAL_PRIVATE)) {
+						throw new UnsupportedOperationException(
+								"Private dependencies are not supported in this version: "
+										+ Versions.VERSION_STRING_FULL);
+					}
+					return r;
+				}, logger);
+		if (satisfied == null) {
+			return null;
+		}
+		return new ResolutionResult<>(basebundle, basebundlecontext, satisfied);
+	}
+
+	/**
+	 * Executes the dependency resolution with the given arguments.
+	 * <p>
+	 * The dependency resolution algorithm defines no methodology about findig the bundles and their dependency
+	 * information. These functionalities must be implemented by the caller and plugged in to the dependency resolution
+	 * algorithm via the argument function interface instances.
+	 * <p>
+	 * The dependency resolution algorithm is deterministic, meaning that if the inputs are the same and have the same
+	 * iteration orders, it will produce the same output.
+	 * <p>
+	 * The algorithm basically works on {@link BundleIdentifier BundleIdentifiers}, however, in order to support various
+	 * scenarios such as a bundle identifier occurring multiple times, the algorithm works with the type parameters of
+	 * <code>BK</code> (bundle key) and <code>BC</code> (bundle context). <code>BK</code> type serves as the key to the
+	 * bundle, that uniquely locates both the bundle identifier and its location in some arbitrary space. The
+	 * <code>BC</code> type serves as a transient information about the found bundle that can be used to store
+	 * information for further operations. The bundle context is later passed to the dependency lookup function.
+	 * <p>
+	 * In general, types such as {@link BundleKey} or similar should be used as a substitute for the <code>BK</code>
+	 * type parameter, and {@link BundleLookup} or other information for <code>BC</code>. Other arbitrary client
+	 * provided types may be used as well.
+	 * <p>
+	 * Both the <code>BK</code> and <code>BC</code> types should be comparable using {@linkplain Object#equals(Object)
+	 * equality}.
+	 * <p>
+	 * The dependency resolution algorithm first tries to resolve all non-optional (required) dependencies. If the
+	 * resolution of these succeed, then these dependencies will be pinned, and it will attempt to resolve the
+	 * {@linkplain BundleDependency#isOptional() optional} dependencies as well. However, the resolution of the optional
+	 * dependencies may fail, in which case it is silently ignored by the method implementation.
+	 * <p>
+	 * The dependency resolution algorithm is exhaustive, meaning that it will not fail if there is a possible
+	 * resolution of dependencies. The algorithm supports circular dependencies.
+	 * <p>
+	 * The method handles {@linkplain BundleInformation#DEPENDENCY_META_PRIVATE private} dependencies as it is defined
+	 * by the repository.
+	 * <p>
+	 * The method accepts a {@linkplain DependencyResolutionLogger logger} which will be called at different times
+	 * during the dependency resolution to notify about the current state. If the dependency resolution fails, the
+	 * caller can use the information passed to the logger to determine the cause of the failure. This method doesn't
+	 * directly report the cause, and doesn't analyze the failures by itself.
+	 * 
+	 * @param <BK>
+	 *            The bundle key type. The type should be comparable using {@linkplain Object#equals(Object) equality}.
+	 * @param <BC>
+	 *            The bundle context type. The type should be comparable using {@linkplain Object#equals(Object)
+	 *            equality}.
+	 * @param basebundle
+	 *            The root bundle to resolve the dependencies of. Must not be <code>null</code>. <br>
+	 *            If one cannot provide a root bundle identifier, as the resolution happens in a way that there's none,
+	 *            one can use the {@link #randomBundleIdentifier()} to create a unique bundle identifier that this
+	 *            function accepts. Make sure to remove logging information about the generated bundle identifier not to
+	 *            pollute the user logs.
+	 * @param basebundlecontext
+	 *            The bundle context for the root bundle.
+	 * @param basedependencyinfo
+	 *            The dependency information of the root bundle that should be resolved.
+	 * @param bundleslookupfunction
+	 *            The function that looks up the bundles for a given bundle identifier. The bundle identifier argument
+	 *            doesn't contain a {@linkplain BundleIdentifier#getVersionQualifier() version qualifier}. If the result
+	 *            iterable is backed by a {@link Map} entry set, then it is recommended that the {@link Map} returned
+	 *            from this function has a deterministic iteration order. (See {@link LinkedHashMap} or
+	 *            {@link TreeMap}.) <br>
+	 *            The returned iterable from the function may be lazily populated.
+	 * @param bundledependencieslookupfunction
+	 *            The function that looks up the dependency information for a bundle. The arguments for this function is
+	 *            the ones that were returned from the lookup function (or the root bundle key and context). The bundle
+	 *            identifier argument contains a {@linkplain BundleIdentifier#getVersionQualifier() version qualifier}.
+	 * @param logger
+	 *            The dependency resolution logger or <code>null</code> to not use one.
+	 * @return The result of the dependency resolution or <code>null</code> if the resolution failed.
+	 * @throws NullPointerException
+	 *             If the base bundle, base dependency information, bundle lookup function, or bundle dependencies
+	 *             lookup function arguments are <code>null</code>.
+	 * @throws IllegalArgumentException
+	 *             If the base bundle identifier doesn't have a {@linkplain BundleIdentifier#getVersionQualifier()
+	 *             version qualifier}.
+	 * @since saker.nest 0.8.1
+	 */
+	public static <BK extends BundleIdentifierHolder, BC> DependencyDomainResolutionResult<BK, BC> satisfyDependencyDomain(
 			BK basebundle, BC basebundlecontext, BundleDependencyInformation basedependencyinfo,
 			BiFunction<? super BundleIdentifier, ? super BC, ? extends Iterable<? extends Entry<? extends BK, ? extends BC>>> bundleslookupfunction,
 			BiFunction<? super BK, ? super BC, ? extends BundleDependencyInformation> bundledependencieslookupfunction,
@@ -147,20 +264,15 @@ public class DependencyUtils {
 
 		Map<Entry<? extends BundleIdentifier, ? extends BC>, Iterable<? extends Entry<? extends BK, ? extends BC>>> bundleslookupcache = new HashMap<>();
 		Map<BK, Supplier<BundleDependencyInformation>> dependencieslookupcache = new HashMap<>();
-		Map<BK, Supplier<BundleDependencyInformation>> dependencieswithoutoptionalslookupcache = new HashMap<>();
+		Map<BK, Supplier<BundleDependencyInformation>> dependencieswithoutspecialslookupcache = new HashMap<>();
 		Map<BK, BundleDependencyInformation> optionalhavingbundles = new HashMap<>();
 
 		Entry<? extends BK, ? extends BC> basebundleentry = ImmutableUtils.makeImmutableMapEntry(basebundle,
 				basebundlecontext);
-		Entry<? extends BundleIdentifier, ? extends BC> basewithoutversionbundleentry = ImmutableUtils
-				.makeImmutableMapEntry(basebundle.getBundleIdentifier().withoutMetaQualifiers(), basebundlecontext);
-		if (basedependencyinfo.hasOptional()) {
+		int basespeciality = querySpecialDependendyFlags(basedependencyinfo);
+		if (((basespeciality & SPECIAL_OPTIONAL) == SPECIAL_OPTIONAL)) {
 			optionalhavingbundles.put(basebundle, basedependencyinfo);
 		}
-
-		bundleslookupcache.put(
-				ImmutableUtils.makeImmutableMapEntry(basebundle.getBundleIdentifier(), basebundlecontext),
-				Collections.singletonList(ImmutableUtils.makeImmutableMapEntry(basebundle, null)));
 
 		BiFunction<? super BundleIdentifier, ? super BC, ? extends Iterable<? extends Entry<? extends BK, ? extends BC>>> cachingbundleslookupfunction = (
 				bi, bc) -> {
@@ -175,9 +287,9 @@ public class DependencyUtils {
 			});
 		};
 
-		BundleDependencyInformation basedepinfowithoutoptionals = basedependencyinfo.withoutOptionals();
+		BundleDependencyInformation basedepinfowithoutspecials = withoutOptionalDependencies(basedependencyinfo);
 		dependencieslookupcache.put(basebundle, Functionals.valSupplier(basedependencyinfo));
-		dependencieswithoutoptionalslookupcache.put(basebundle, Functionals.valSupplier(basedepinfowithoutoptionals));
+		dependencieswithoutspecialslookupcache.put(basebundle, Functionals.valSupplier(basedepinfowithoutspecials));
 
 		BiFunction<? super BK, ? super BC, ? extends BundleDependencyInformation> cachingbundledependencieslookupfunction = (
 				bi, bc) -> {
@@ -187,77 +299,232 @@ public class DependencyUtils {
 					if (depinfos == null) {
 						return null;
 					}
-					if (depinfos.hasOptional()) {
+
+					int depspeciality = querySpecialDependendyFlags(depinfos);
+					if (((depspeciality & SPECIAL_OPTIONAL) == SPECIAL_OPTIONAL)) {
 						optionalhavingbundles.put(kentry, depinfos);
-						return depinfos;
 					}
+
 					return depinfos;
 				});
 			}).get();
 		};
-		BiFunction<? super BK, ? super BC, ? extends BundleDependencyInformation> cachingbundledependencieswithoutoptionalslookupfunction = (
+		BiFunction<? super BK, ? super BC, ? extends BundleDependencyInformation> cachingbundledependencieswithoutspecialslookupfunction = (
 				bi, bc) -> {
-			return dependencieswithoutoptionalslookupcache.computeIfAbsent(bi, kentry -> {
+			return dependencieswithoutspecialslookupcache.computeIfAbsent(bi, kentry -> {
 				return LazySupplier.of(() -> {
 					BundleDependencyInformation depinfos = cachingbundledependencieslookupfunction.apply(bi, bc);
 					if (depinfos != null) {
-						return depinfos.withoutOptionals();
+						return withoutOptionalDependencies(depinfos);
 					}
 					return null;
 				});
 			}).get();
 		};
 
-		BundleResolutionState<BK, BC> bundleresstate = new BundleResolutionState<>(basebundleentry,
-				basedepinfowithoutoptionals, logger);
-
-		Map<Entry<? extends BundleIdentifier, ? extends BC>, Entry<? extends BK, ? extends BC>> result = new HashMap<>();
-
-		result.put(basewithoutversionbundleentry, basebundleentry);
-		satisfyBundleVersion(cachingbundleslookupfunction, cachingbundledependencieswithoutoptionalslookupfunction,
-				result, logger, bundleresstate);
-		if (bundleresstate.isBackTracking()) {
-			return null;
-		}
-
+		Map<PrivateScopeDependencyRoot<? extends BK, ? extends BC>, Optional<DomainResult<BK, BC>>> privatescopedomains = new HashMap<>();
+		DomainResult<BK, BC> basedomain = DomainResult.newDomain(basebundleentry);
 		{
-			Set<Entry<? extends BK, ? extends BC>> checkedoptionals = new HashSet<>();
-			LinkedList<Entry<? extends BK, ? extends BC>> bundlestack = new LinkedList<>();
-			bundlestack.add(basebundleentry);
-			while (!bundlestack.isEmpty()) {
-				Entry<? extends BK, ? extends BC> bundle = bundlestack.removeFirst();
-				if (!checkedoptionals.add(bundle)) {
-					continue;
-				}
-				BundleDependencyInformation optionalinfo = optionalhavingbundles.get(bundle.getKey());
-				if (optionalinfo != null) {
-					for (Entry<BundleIdentifier, ? extends BundleDependencyList> entry : optionalinfo.getDependencies()
-							.entrySet()) {
-						BundleDependencyList deplist = entry.getValue();
-						if (deplist.hasOptional()) {
-							BundleDependencyInformation optionaladded = BundleDependencyInformation
-									.create(Collections.singletonMap(entry.getKey(), deplist));
-							BundleResolutionState<BK, BC> nbundleresstate = new BundleResolutionState<>(bundle,
-									optionaladded, logger);
-							satisfyBundleVersion(cachingbundleslookupfunction,
-									cachingbundledependencieswithoutoptionalslookupfunction, result, logger,
-									nbundleresstate);
-							//doesnt matter if the satisfying of the optional bundle have succeeded
-						}
-					}
-				}
-				BundleDependencyInformation deps = dependencieslookupcache.get(bundle.getKey()).get();
-				for (BundleIdentifier depbundle : deps.getDependencies().keySet()) {
-					Entry<? extends BK, ? extends BC> resbundle = result
-							.get(ImmutableUtils.makeImmutableMapEntry(depbundle, bundle.getValue()));
-					if (resbundle != null) {
-						bundlestack.add(resbundle);
-					}
-				}
+			BundleResolutionState<BK, BC> bundleresstate = new BundleResolutionState<>(basedepinfowithoutspecials,
+					logger, basebundleentry);
+			satisfyBundleVersion(cachingbundleslookupfunction, cachingbundledependencieswithoutspecialslookupfunction,
+					basedomain, logger, bundleresstate, privatescopedomains);
+			if (bundleresstate.isBackTracking()) {
+				return null;
 			}
 		}
 
-		return new ResolutionResult<>(result, basewithoutversionbundleentry, basebundleentry, dependencieslookupcache);
+		Set<DomainResult<BK, BC>> checkedoptionals = new HashSet<>();
+		while (true) {
+			boolean hadchange = false;
+			ArrayDeque<DomainResult<BK, BC>> bundlestack = new ArrayDeque<>(basedomain.getTotalDomain());
+			while (!bundlestack.isEmpty()) {
+				DomainResult<BK, BC> bundledomain = bundlestack.removeFirst();
+				if (!checkedoptionals.add(bundledomain)) {
+					continue;
+				}
+
+				BundleDependencyInformation optionalinfo = optionalhavingbundles.get(bundledomain.bundleEntry.getKey());
+				if (optionalinfo == null) {
+					continue;
+				}
+
+				for (Entry<BundleIdentifier, ? extends BundleDependencyList> entry : optionalinfo.getDependencies()
+						.entrySet()) {
+					BundleDependencyList deplist = entry.getValue();
+					if (!deplist.hasOptional()) {
+						continue;
+					}
+					deplist = onlyOptionals(deplist);
+					BundleDependencyInformation optionaladded = BundleDependencyInformation
+							.create(Collections.singletonMap(entry.getKey(), deplist));
+					BundleResolutionState<BK, BC> nbundleresstate = new BundleResolutionState<>(optionaladded, logger,
+							bundledomain.bundleEntry);
+					satisfyBundleVersion(cachingbundleslookupfunction,
+							cachingbundledependencieswithoutspecialslookupfunction, bundledomain, logger,
+							nbundleresstate, privatescopedomains);
+					if (!nbundleresstate.isBackTracking()) {
+						hadchange = true;
+					}
+					//doesnt matter if the satisfying of the optional bundle have succeeded
+				}
+			}
+			if (!hadchange) {
+				break;
+			}
+		}
+
+		return new DependencyDomainResolutionResultImpl<>(basedomain, dependencieslookupcache);
+	}
+
+	private static final class DependencyDomainResolutionResultImpl<BK extends BundleIdentifierHolder, BC>
+			implements DependencyDomainResolutionResult<BK, BC> {
+
+		//immutable linked hash map
+		protected Map<Entry<? extends BK, ? extends BC>, ? extends DependencyDomainResolutionResultImpl<BK, BC>> directDependencies;
+
+		private DependencyDomainResolutionResultImpl() {
+		}
+
+		public DependencyDomainResolutionResultImpl(DomainResult<BK, BC> basedomain,
+				Map<BK, Supplier<BundleDependencyInformation>> dependencieslookupcache) {
+			this(basedomain, dependencieslookupcache, new HashMap<>());
+		}
+
+		public DependencyDomainResolutionResultImpl(DomainResult<BK, BC> basedomain,
+				Map<BK, Supplier<BundleDependencyInformation>> dependencieslookupcache,
+				Map<DomainResult<BK, BC>, DependencyDomainResolutionResultImpl<BK, BC>> created) {
+			LinkedHashMap<Entry<? extends BK, ? extends BC>, DependencyDomainResolutionResultImpl<BK, BC>> directdependencies = createDirectDependencies(
+					basedomain, dependencieslookupcache, created);
+			this.directDependencies = ImmutableUtils.unmodifiableMap(directdependencies);
+		}
+
+		private static <BK extends BundleIdentifierHolder, BC> LinkedHashMap<Entry<? extends BK, ? extends BC>, DependencyDomainResolutionResultImpl<BK, BC>> createDirectDependencies(
+				DomainResult<BK, BC> basedomain, Map<BK, Supplier<BundleDependencyInformation>> dependencieslookupcache,
+				Map<DomainResult<BK, BC>, DependencyDomainResolutionResultImpl<BK, BC>> created) {
+			LinkedHashMap<Entry<? extends BK, ? extends BC>, DependencyDomainResolutionResultImpl<BK, BC>> directdependencies = new LinkedHashMap<>();
+			BundleDependencyInformation depinfo = dependencieslookupcache.get(basedomain.bundleEntry.getKey()).get();
+
+			for (BundleIdentifier dep : depinfo.getDependencies().keySet()) {
+				Entry<Entry<? extends BK, ? extends BC>, DomainResult<BK, BC>> depentry = getDependencyEntryWithBundleId(
+						basedomain.directDependencies, dep);
+				if (depentry == null) {
+					//possible when optional was not resolved
+					continue;
+				}
+
+				Entry<? extends BK, ? extends BC> depbundleentry = depentry.getKey();
+				DomainResult<BK, BC> depdomain = depentry.getValue();
+				DependencyDomainResolutionResultImpl<BK, BC> directdomainres = created.get(depdomain);
+				if (directdomainres == null) {
+					directdomainres = new DependencyDomainResolutionResultImpl<>();
+					created.put(depdomain, directdomainres);
+
+					directdomainres.directDependencies = createDirectDependencies(depdomain, dependencieslookupcache,
+							created);
+				}
+				directdependencies.put(depbundleentry, directdomainres);
+			}
+
+			return directdependencies;
+		}
+
+		@Override
+		public Map<Entry<? extends BK, ? extends BC>, ? extends DependencyDomainResolutionResult<BK, BC>> getDirectDependencies() {
+			return directDependencies;
+		}
+
+		@Override
+		public int hashCode() {
+			//don't do transitive hash code
+			return directDependencies.keySet().hashCode();
+		}
+
+		private boolean equals(DependencyDomainResolutionResultImpl<?, ?> domain,
+				Map<DependencyDomainResolutionResultImpl<?, ?>, DependencyDomainResolutionResultImpl<?, ?>> identitycheckedset) {
+			DependencyDomainResolutionResult<?, ?> prev = identitycheckedset.putIfAbsent(this, domain);
+			if (prev != null) {
+				if (prev != domain) {
+					return false;
+				}
+				return true;
+			}
+			//we need to check
+			if (this.directDependencies.size() != domain.directDependencies.size()) {
+				return false;
+			}
+			Iterator<? extends Entry<? extends Entry<? extends BundleIdentifierHolder, ?>, ? extends DependencyDomainResolutionResultImpl<?, ?>>> thisit = this.directDependencies
+					.entrySet().iterator();
+			Iterator<? extends Entry<? extends Entry<? extends BundleIdentifierHolder, ?>, ? extends DependencyDomainResolutionResultImpl<?, ?>>> dit = domain.directDependencies
+					.entrySet().iterator();
+			while (thisit.hasNext()) {
+				if (!dit.hasNext()) {
+					return false;
+				}
+				Entry<? extends Entry<? extends BundleIdentifierHolder, ?>, ? extends DependencyDomainResolutionResultImpl<?, ?>> thisentry = thisit
+						.next();
+				Entry<? extends Entry<? extends BundleIdentifierHolder, ?>, ? extends DependencyDomainResolutionResultImpl<?, ?>> dentry = dit
+						.next();
+				if (!thisentry.getKey().equals(dentry.getKey())) {
+					return false;
+				}
+				DependencyDomainResolutionResultImpl<?, ?> thisdomain = thisentry.getValue();
+				DependencyDomainResolutionResultImpl<?, ?> ddomain = dentry.getValue();
+				if (!thisdomain.equals(ddomain, identitycheckedset)) {
+					return false;
+				}
+			}
+			if (dit.hasNext()) {
+				return false;
+			}
+			return true;
+		}
+
+		@Override
+		public boolean equals(Object obj) {
+			if (this == obj)
+				return true;
+			if (obj == null)
+				return false;
+			if (getClass() != obj.getClass())
+				return false;
+			DependencyDomainResolutionResultImpl<?, ?> other = (DependencyDomainResolutionResultImpl<?, ?>) obj;
+			if (!this.equals(other, new IdentityHashMap<>())) {
+				return false;
+			}
+			return true;
+		}
+
+		protected void toString(StringBuilder sb, Set<DependencyDomainResolutionResultImpl<BK, BC>> added) {
+			if (!added.add(this)) {
+				sb.append("<previous @");
+				sb.append(Integer.toHexString(System.identityHashCode(this)));
+				sb.append(">");
+				return;
+			}
+			sb.append('@');
+			sb.append(Integer.toHexString(System.identityHashCode(this)));
+			sb.append("{");
+			for (Iterator<? extends Entry<Entry<? extends BK, ? extends BC>, ? extends DependencyDomainResolutionResultImpl<BK, BC>>> it = directDependencies
+					.entrySet().iterator(); it.hasNext();) {
+				Entry<Entry<? extends BK, ? extends BC>, ? extends DependencyDomainResolutionResultImpl<BK, BC>> entry = it
+						.next();
+				sb.append(entry.getKey().getKey().getBundleIdentifier());
+				sb.append(": ");
+				entry.getValue().toString(sb, added);
+				if (it.hasNext()) {
+					sb.append(", ");
+				}
+			}
+			sb.append("}");
+		}
+
+		@Override
+		public String toString() {
+			StringBuilder sb = new StringBuilder();
+			toString(sb, ObjectUtils.newIdentityHashSet());
+			return sb.toString();
+		}
 	}
 
 	private static class RandomHolder {
@@ -543,38 +810,104 @@ public class DependencyUtils {
 		return architectures == null || architectures.contains(arch);
 	}
 
+	private static final int SPECIAL_OPTIONAL = 1 << 1;
+	private static final int SPECIAL_PRIVATE = 1 << 2;
+	private static final int SPECIAL_ALL = SPECIAL_OPTIONAL | SPECIAL_PRIVATE;
+
+	private static int querySpecialDependendyFlags(BundleDependencyInformation deps) {
+		int result = 0;
+		for (BundleDependencyList dlist : deps.getDependencies().values()) {
+			for (BundleDependency d : dlist.getDependencies()) {
+				if (((result & SPECIAL_OPTIONAL) != SPECIAL_OPTIONAL)) {
+					if (d.isOptional()) {
+						result |= SPECIAL_OPTIONAL;
+						if (result == SPECIAL_ALL) {
+							return SPECIAL_ALL;
+						}
+					}
+				}
+				if (((result & SPECIAL_PRIVATE) != SPECIAL_PRIVATE)) {
+					if (d.isPrivate()) {
+						result |= SPECIAL_PRIVATE;
+						if (result == SPECIAL_ALL) {
+							return SPECIAL_ALL;
+						}
+					}
+				}
+			}
+		}
+		return result;
+	}
+
+	private static BundleDependencyList onlyOptionals(BundleDependencyList deplist) {
+		return deplist.filter(d -> !d.isOptional() ? null : d);
+	}
+
+	private static BundleDependencyInformation withoutOptionalDependencies(BundleDependencyInformation deps) {
+		return deps.filter((bi, deplist) -> deplist.filter(d -> d.isOptional() ? null : d));
+	}
+
 	private static <BK extends BundleIdentifierHolder, BC> boolean satisfy(DependencyResolutionState<BK, BC> state,
 			BiFunction<? super BundleIdentifier, ? super BC, ? extends Iterable<? extends Entry<? extends BK, ? extends BC>>> bundleslookupfunction,
 			BiFunction<? super BK, ? super BC, ? extends BundleDependencyInformation> bundledependencieslookupfunction,
-			Map<Entry<? extends BundleIdentifier, ? extends BC>, Entry<? extends BK, ? extends BC>> pinnedbundles,
-			DependencyResolutionLogger<? super BC> logger) {
+			DomainResult<BK, BC> domain, DependencyResolutionLogger<? super BC> logger,
+			Map<PrivateScopeDependencyRoot<? extends BK, ? extends BC>, Optional<DomainResult<BK, BC>>> privatescopedomains,
+			boolean privatescope, BundleDependencyList deplist) {
 		if (logger != null) {
-			logger.enter(state.bundleId.getKey(), state.bundleId.getValue());
+			logger.enter(state.versionlessBundleId.getKey(), state.versionlessBundleId.getValue());
 		}
-		while (state.hasNextBundle()) {
-			BundleResolutionState<BK, BC> bundleresolutionstate = state.nextBundle();
-			{
-				Object prev = pinnedbundles.putIfAbsent(state.bundleId, bundleresolutionstate.bundleEntry);
-				if (prev != null) {
-					throw new AssertionError("Already present: " + state.bundleId + " - " + prev + " against "
-							+ bundleresolutionstate.bundleEntry);
+
+		BundleResolutionState<BK, BC> bundleresolutionstate;
+		while ((bundleresolutionstate = state.nextBundle()) != null) {
+			DomainResult<BK, BC> usedomain;
+			PrivateScopeDependencyRoot<BK, BC> privscope = null;
+			if (privatescope) {
+				Set<Entry<? extends BK, ? extends BC>> pinsnapshot = domain.getPrivatePinSnapshot();
+				privscope = new PrivateScopeDependencyRoot<>(pinsnapshot, domain.bundleEntry, deplist);
+				if (!bundleresolutionstate.isBackTracking()) {
+					//don't use the snapshot if we're backtracking as there may be conflicts down the line
+					Optional<DomainResult<BK, BC>> presentpriv = privatescopedomains.get(privscope);
+					if (presentpriv != null) {
+						DomainResult<BK, BC> privdomain = presentpriv.orElse(null);
+						if (privdomain != null) {
+							domain.pinDirectDependency(state.versionlessBundleId, privdomain);
+						} else {
+							bundleresolutionstate.startBackTrack();
+						}
+						if (logger != null) {
+							logger.exit(state.versionlessBundleId.getKey(), state.versionlessBundleId.getValue(),
+									bundleresolutionstate.getBundleKey().getBundleIdentifier(),
+									bundleresolutionstate.getBundleContext());
+						}
+						return true;
+					}
 				}
+				usedomain = DomainResult.newPrivateSubDomain(domain, bundleresolutionstate.bundleEntry);
+				privatescopedomains.put(privscope, Optional.of(usedomain));
+
+			} else {
+				usedomain = DomainResult.newSubDomain(domain, bundleresolutionstate.bundleEntry);
 			}
-			satisfyBundleVersion(bundleslookupfunction, bundledependencieslookupfunction, pinnedbundles, logger,
-					bundleresolutionstate);
+			domain.pinDirectDependency(state.versionlessBundleId, usedomain);
+
+			satisfyBundleVersion(bundleslookupfunction, bundledependencieslookupfunction, usedomain, logger,
+					bundleresolutionstate, privatescopedomains);
+			domain.getPinned(state.versionlessBundleId);
 			//satisfied the bundle, if we're no longer backtracking
 			if (!bundleresolutionstate.isBackTracking()) {
 				if (logger != null) {
-					logger.exit(state.bundleId.getKey(), state.bundleId.getValue(),
+					logger.exit(state.versionlessBundleId.getKey(), state.versionlessBundleId.getValue(),
 							bundleresolutionstate.getBundleKey().getBundleIdentifier(),
 							bundleresolutionstate.getBundleContext());
 				}
+				//store the state so if we need to backtract, we can continue from here
+				state.storeState(bundleresolutionstate);
 				return true;
 			}
-			pinnedbundles.remove(state.bundleId);
+			domain.unpinDirectDependency(state.versionlessBundleId, usedomain);
 		}
 		if (logger != null) {
-			logger.exit(state.bundleId.getKey(), state.bundleId.getValue(), null, null);
+			logger.exit(state.versionlessBundleId.getKey(), state.versionlessBundleId.getValue(), null, null);
 		}
 		return false;
 	}
@@ -582,25 +915,30 @@ public class DependencyUtils {
 	private static <BK extends BundleIdentifierHolder, BC> void satisfyBundleVersion(
 			BiFunction<? super BundleIdentifier, ? super BC, ? extends Iterable<? extends Entry<? extends BK, ? extends BC>>> bundleslookupfunction,
 			BiFunction<? super BK, ? super BC, ? extends BundleDependencyInformation> bundledependencieslookupfunction,
-			Map<Entry<? extends BundleIdentifier, ? extends BC>, Entry<? extends BK, ? extends BC>> pinnedbundles,
-			DependencyResolutionLogger<? super BC> logger, BundleResolutionState<BK, BC> bundleresolutionstate) {
+			DomainResult<BK, BC> domain, DependencyResolutionLogger<? super BC> logger,
+			BundleResolutionState<BK, BC> bundleresolutionstate,
+			Map<PrivateScopeDependencyRoot<? extends BK, ? extends BC>, Optional<DomainResult<BK, BC>>> privatescopedomains) {
 		if (logger != null) {
 			logger.enterVersion(bundleresolutionstate.getBundleKey().getBundleIdentifier(),
 					bundleresolutionstate.getBundleContext());
 		}
+		DependencyResolutionState<BK, BC> deprs;
 		bundle_resolver:
-		while (bundleresolutionstate.hasNext()) {
-			DependencyResolutionState<BK, BC> deprs = bundleresolutionstate.next(bundleslookupfunction,
-					bundledependencieslookupfunction);
-			if (deprs.satisfiedBundleResults != null) {
-				pinnedbundles.keySet().removeAll(deprs.satisfiedBundleResults);
-				deprs.satisfiedBundleResults = null;
+		while ((deprs = bundleresolutionstate.next(bundleslookupfunction, bundledependencieslookupfunction)) != null) {
+			domain.unpinBacktrack(deprs.versionlessBundleId);
+
+			BundleDependencyList deplist = bundleresolutionstate.dependencyInfo
+					.getDependencyList(deprs.versionlessBundleId.getKey());
+			boolean privatescope = ConfiguredRepositoryStorage.isAllPrivateDependencies(deplist);
+			DomainResult<BK, BC> presentbundledomain;
+			if (privatescope) {
+				presentbundledomain = domain.getPrivatePinned(deprs.versionlessBundleId);
+			} else {
+				presentbundledomain = domain.getPinned(deprs.versionlessBundleId);
 			}
-			Entry<? extends BK, ? extends BC> presentbundle = pinnedbundles.get(deprs.bundleId);
-			if (presentbundle != null) {
+			if (presentbundledomain != null) {
+				Entry<? extends BK, ? extends BC> presentbundle = presentbundledomain.bundleEntry;
 				String version = presentbundle.getKey().getBundleIdentifier().getVersionNumber();
-				BundleDependencyList deplist = bundleresolutionstate.dependencyInfo
-						.getDependencyList(deprs.bundleId.getKey());
 				for (BundleDependency bdep : deplist.getDependencies()) {
 					VersionRange range = bdep.getRange();
 					if (!range.includes(version)) {
@@ -612,22 +950,20 @@ public class DependencyUtils {
 						continue bundle_resolver;
 					}
 				}
+				domain.pinDirectDependency(deprs.versionlessBundleId, presentbundledomain);
 				if (logger != null) {
-					logger.dependencyFoundPinned(deprs.bundleId.getKey(), deprs.bundleId.getValue(),
-							presentbundle.getKey().getBundleIdentifier(), presentbundle.getValue());
+					logger.dependencyFoundPinned(deprs.versionlessBundleId.getKey(),
+							deprs.versionlessBundleId.getValue(), presentbundle.getKey().getBundleIdentifier(),
+							presentbundle.getValue());
 				}
-				continue;
+				continue bundle_resolver;
 			}
-			Map<Entry<? extends BundleIdentifier, ? extends BC>, Entry<? extends BK, ? extends BC>> subpinned = new HashMap<>(
-					pinnedbundles);
-			boolean satisfied = satisfy(deprs, bundleslookupfunction, bundledependencieslookupfunction, subpinned,
-					logger);
+
+			boolean satisfied = satisfy(deprs, bundleslookupfunction, bundledependencieslookupfunction, domain, logger,
+					privatescopedomains, privatescope, deplist);
 			if (!satisfied) {
 				bundleresolutionstate.startBackTrack();
 			} else {
-				subpinned.keySet().removeAll(pinnedbundles.keySet());
-				pinnedbundles.putAll(subpinned);
-				deprs.satisfiedBundleResults = subpinned.keySet();
 				bundleresolutionstate.clearBackTrack();
 			}
 		}
@@ -637,50 +973,285 @@ public class DependencyUtils {
 		}
 	}
 
+	private static <BK extends BundleIdentifierHolder, BC> Entry<BundleIdentifier, BC> versionlessBundleEntry(
+			Entry<? extends BK, ? extends BC> entry) {
+		return ImmutableUtils.makeImmutableMapEntry(entry.getKey().getBundleIdentifier().withoutMetaQualifiers(),
+				entry.getValue());
+	}
+
+	private static final class PrivateScopeDependencyRoot<BK extends BundleIdentifierHolder, BC> {
+		protected final Set<Entry<? extends BK, ? extends BC>> pinSnapshot;
+		protected final Entry<? extends BK, ? extends BC> refBundle;
+		protected final BundleDependencyList dependencyList;
+
+		public PrivateScopeDependencyRoot(Set<Entry<? extends BK, ? extends BC>> pinSnapshot,
+				Entry<? extends BK, ? extends BC> refBundle, BundleDependencyList dependencyList) {
+			this.pinSnapshot = pinSnapshot;
+			this.refBundle = refBundle;
+			this.dependencyList = dependencyList;
+		}
+
+		@Override
+		public int hashCode() {
+			final int prime = 31;
+			int result = 1;
+			result = prime * result + ((dependencyList == null) ? 0 : dependencyList.hashCode());
+			result = prime * result + ((pinSnapshot == null) ? 0 : pinSnapshot.hashCode());
+			result = prime * result + ((refBundle == null) ? 0 : refBundle.hashCode());
+			return result;
+		}
+
+		@Override
+		public boolean equals(Object obj) {
+			if (this == obj)
+				return true;
+			if (obj == null)
+				return false;
+			if (getClass() != obj.getClass())
+				return false;
+			PrivateScopeDependencyRoot<?, ?> other = (PrivateScopeDependencyRoot<?, ?>) obj;
+			if (dependencyList == null) {
+				if (other.dependencyList != null)
+					return false;
+			} else if (!dependencyList.equals(other.dependencyList))
+				return false;
+			if (pinSnapshot == null) {
+				if (other.pinSnapshot != null)
+					return false;
+			} else if (!pinSnapshot.equals(other.pinSnapshot))
+				return false;
+			if (refBundle == null) {
+				if (other.refBundle != null)
+					return false;
+			} else if (!refBundle.equals(other.refBundle))
+				return false;
+			return true;
+		}
+	}
+
+	private static <BK extends BundleIdentifierHolder, BC, T> Entry<Entry<? extends BK, ? extends BC>, T> getDependencyEntryWithBundleId(
+			Map<Entry<? extends BK, ? extends BC>, T> directDependencies, BundleIdentifier bundleid) {
+		for (Entry<Entry<? extends BK, ? extends BC>, T> entry : directDependencies.entrySet()) {
+			if (entry.getKey().getKey().getBundleIdentifier().withoutMetaQualifiers().equals(bundleid)) {
+				return entry;
+			}
+		}
+		return null;
+	}
+
 	private DependencyUtils() {
 		throw new UnsupportedOperationException();
 	}
 
+	private static final class DomainResult<BK extends BundleIdentifierHolder, BC> {
+		protected final DomainResult<BK, BC> parent;
+		protected final boolean privateParent;
+
+		protected final Entry<? extends BK, ? extends BC> bundleEntry;
+		protected final Map<Entry<? extends BK, ? extends BC>, DomainResult<BK, BC>> directDependencies;
+		protected final Map<Entry<? extends BundleIdentifier, ? extends BC>, Entry<? extends BK, ? extends BC>> dependencyVersionlessLookup = new HashMap<>();
+
+		public Set<Entry<? extends BK, ? extends BC>> getPrivatePinSnapshot() {
+			Set<Entry<? extends BK, ? extends BC>> result = new HashSet<>();
+			collectPrivatePinSnapshot(result, true);
+			return result;
+		}
+
+		protected void collectPrivatePinSnapshot(Set<Entry<? extends BK, ? extends BC>> result,
+				boolean includeprivates) {
+			if (!result.add(bundleEntry)) {
+				return;
+			}
+			for (Entry<Entry<? extends BK, ? extends BC>, DomainResult<BK, BC>> entry : directDependencies.entrySet()) {
+				DomainResult<BK, BC> domainres = entry.getValue();
+				if (!includeprivates && domainres.privateParent) {
+					continue;
+				}
+				domainres.collectPrivatePinSnapshot(result, false);
+			}
+		}
+
+		public static <BK extends BundleIdentifierHolder, BC> DomainResult<BK, BC> newDomain(
+				Entry<? extends BK, ? extends BC> bundleEntry) {
+			return new DomainResult<>(bundleEntry);
+		}
+
+		public static <BK extends BundleIdentifierHolder, BC> DomainResult<BK, BC> newPrivateSubDomain(
+				DomainResult<BK, BC> parent, Entry<? extends BK, ? extends BC> bundleEntry) {
+			return new DomainResult<>(parent, true, bundleEntry);
+		}
+
+		public static <BK extends BundleIdentifierHolder, BC> DomainResult<BK, BC> newSubDomain(
+				DomainResult<BK, BC> parent, Entry<? extends BK, ? extends BC> bundleEntry) {
+			return new DomainResult<>(parent, false, bundleEntry);
+		}
+
+		protected DomainResult<BK, BC> findPinned(Entry<? extends BundleIdentifier, ? extends BC> versionlessBundleId,
+				Set<DomainResult<BK, BC>> searched, boolean ignoreprivate) {
+			if (!searched.add(this)) {
+				return null;
+			}
+			if (versionlessBundleEntry(bundleEntry).equals(versionlessBundleId)) {
+				return this;
+			}
+			Entry<? extends BK, ? extends BC> deppinned = dependencyVersionlessLookup.get(versionlessBundleId);
+			if (deppinned != null) {
+				DomainResult<BK, BC> depref = directDependencies.get(deppinned);
+				if (!ignoreprivate || !depref.privateParent) {
+					return depref;
+				}
+			}
+			for (DomainResult<BK, BC> dr : directDependencies.values()) {
+				if (ignoreprivate && dr.privateParent) {
+					continue;
+				}
+				DomainResult<BK, BC> subfound = dr.findPinned(versionlessBundleId, searched, true);
+				if (subfound != null) {
+					return subfound;
+				}
+			}
+			return null;
+		}
+
+		public DomainResult<BK, BC> getPrivatePinned(
+				Entry<? extends BundleIdentifier, ? extends BC> versionlessBundleId) {
+			return findPinned(versionlessBundleId, new HashSet<>(), false);
+		}
+
+		public DomainResult<BK, BC> getPinned(Entry<? extends BundleIdentifier, ? extends BC> versionlessBundleId) {
+			if (privateParent) {
+				return parent.findPinned(versionlessBundleId, new HashSet<>(), false);
+			}
+			if (parent != null) {
+				return parent.getPinned(versionlessBundleId);
+			}
+			return findPinned(versionlessBundleId, new HashSet<>(), false);
+		}
+
+		public void pinDirectDependency(Entry<? extends BundleIdentifier, ? extends BC> versionlessBundleId,
+				DomainResult<BK, BC> domain) {
+			DomainResult<BK, BC> prev = this.directDependencies.put(domain.bundleEntry, domain);
+			if (prev != null) {
+				if (prev == domain) {
+					return;
+				}
+				throw new AssertionError(
+						"Already present: " + versionlessBundleId + " - " + prev + " against " + domain);
+			}
+			Entry<? extends BK, ? extends BC> pprev = this.dependencyVersionlessLookup.put(versionlessBundleId,
+					domain.bundleEntry);
+			if (pprev != null) {
+				throw new AssertionError(
+						"Already present: " + versionlessBundleId + " - " + pprev + " against " + domain);
+			}
+		}
+
+		public void unpinBacktrack(Entry<? extends BundleIdentifier, ? extends BC> versionlessBundleId) {
+			Entry<? extends BK, ? extends BC> pinned = this.dependencyVersionlessLookup.remove(versionlessBundleId);
+			if (pinned == null) {
+				return;
+			}
+			this.directDependencies.remove(pinned);
+		}
+
+		public void unpinDirectDependency(Entry<? extends BundleIdentifier, ? extends BC> versionlessBundleId,
+				DomainResult<BK, BC> domain) {
+			if (TestFlag.ENABLED) {
+				if (!versionlessBundleEntry(domain.bundleEntry).equals(versionlessBundleId)) {
+					throw new AssertionError("mismatch " + domain.bundleEntry + " - " + versionlessBundleId);
+				}
+			}
+			boolean removed = this.dependencyVersionlessLookup.remove(versionlessBundleId, domain.bundleEntry);
+			if (!removed) {
+				throw new AssertionError("Failed to unpin: " + versionlessBundleId + " with " + domain + ". present: "
+						+ this.dependencyVersionlessLookup.get(versionlessBundleId));
+			}
+			removed = this.directDependencies.remove(domain.bundleEntry, domain);
+			if (!removed) {
+				throw new AssertionError("Failed to unpin: " + versionlessBundleId + " with " + domain + ". present: "
+						+ this.directDependencies.get(domain.bundleEntry));
+			}
+		}
+
+		private DomainResult(Entry<? extends BK, ? extends BC> bundleEntry) {
+			this.bundleEntry = bundleEntry;
+			this.directDependencies = new HashMap<>();
+			this.parent = null;
+			this.privateParent = false;
+		}
+
+		private DomainResult(DomainResult<BK, BC> parent, boolean privateParent,
+				Entry<? extends BK, ? extends BC> bundleEntry) {
+			this.parent = parent;
+			this.privateParent = privateParent;
+			this.bundleEntry = bundleEntry;
+			this.directDependencies = new HashMap<>();
+		}
+
+		public Set<DomainResult<BK, BC>> getTotalDomain() {
+			LinkedHashSet<DomainResult<BK, BC>> result = new LinkedHashSet<>();
+			collectTotalDomain(result);
+			return result;
+		}
+
+		private void collectTotalDomain(Set<DomainResult<BK, BC>> result) {
+			if (!result.add(this)) {
+				return;
+			}
+			directDependencies.values().forEach(dr -> dr.collectTotalDomain(result));
+		}
+
+		@Override
+		public String toString() {
+			return "DomainResult[" + (bundleEntry != null ? "bundleEntry=" + bundleEntry : "") + "]";
+		}
+
+	}
+
 	private static final class BundleResolutionState<BK extends BundleIdentifierHolder, BC> {
-		//versioned bundle id
 		protected final BundleDependencyInformation dependencyInfo;
 
 		protected final ListIterator<? extends Entry<BundleIdentifier, ? extends BundleDependencyList>> depsIt;
-		protected final LinkedList<DependencyResolutionState<BK, BC>> resolutionStateBacktrack = new LinkedList<>();
+		protected final ArrayDeque<DependencyResolutionState<BK, BC>> resolutionStateBacktrack = new ArrayDeque<>();
 		protected boolean backTracking = false;
 		protected final DependencyResolutionLogger<? super BC> logger;
 		protected final Entry<? extends BK, ? extends BC> bundleEntry;
 
-		public BundleResolutionState(Entry<? extends BK, ? extends BC> bundleentry,
-				BundleDependencyInformation dependencyInfo, DependencyResolutionLogger<? super BC> logger) {
-			this.bundleEntry = bundleentry;
+		public BundleResolutionState(BundleDependencyInformation dependencyInfo,
+				DependencyResolutionLogger<? super BC> logger, Entry<? extends BK, ? extends BC> bundleEntry) {
+			this.bundleEntry = bundleEntry;
 			this.dependencyInfo = dependencyInfo;
 			this.logger = logger;
-			this.depsIt = new ArrayList<>(dependencyInfo.getDependencies().entrySet()).listIterator();
-		}
-
-		public boolean hasNext() {
-			if (backTracking) {
-				return !resolutionStateBacktrack.isEmpty();
-			}
-			return depsIt.hasNext();
+			this.depsIt = ImmutableUtils.makeImmutableList(dependencyInfo.getDependencies().entrySet()).listIterator();
 		}
 
 		public DependencyResolutionState<BK, BC> next(
 				BiFunction<? super BundleIdentifier, ? super BC, ? extends Iterable<? extends Entry<? extends BK, ? extends BC>>> bundleslookupfunction,
 				BiFunction<? super BK, ? super BC, ? extends BundleDependencyInformation> bundledependencieslookupfunction) {
 			if (backTracking) {
+				if (resolutionStateBacktrack.isEmpty()) {
+					return null;
+				}
 				depsIt.previous();
 				return resolutionStateBacktrack.removeLast();
 			}
-			Entry<BundleIdentifier, ? extends BundleDependencyList> depentry = depsIt.next();
-			BundleIdentifier withouversionbi = depentry.getKey();
-			DependencyResolutionState<BK, BC> result = new DependencyResolutionState<>(
-					ImmutableUtils.makeImmutableMapEntry(withouversionbi, getBundleContext()),
-					bundleslookupfunction.apply(withouversionbi, getBundleContext()), depentry.getValue(),
-					bundledependencieslookupfunction, logger);
-			resolutionStateBacktrack.add(result);
-			return result;
+			while (depsIt.hasNext()) {
+				Entry<BundleIdentifier, ? extends BundleDependencyList> depentry = depsIt.next();
+				BundleDependencyList deplist = depentry.getValue();
+				if (deplist.isEmpty()) {
+					//sanity check
+					continue;
+				}
+				BundleIdentifier withouversionbi = depentry.getKey();
+				BC bundlecontext = getBundleContext();
+				DependencyResolutionState<BK, BC> result = new DependencyResolutionState<>(
+						ImmutableUtils.makeImmutableMapEntry(withouversionbi, bundlecontext),
+						bundleslookupfunction.apply(withouversionbi, bundlecontext), deplist,
+						bundledependencieslookupfunction, logger);
+				resolutionStateBacktrack.add(result);
+				return result;
+			}
+			return null;
 		}
 
 		public BC getBundleContext() {
@@ -689,6 +1260,10 @@ public class DependencyUtils {
 
 		public BK getBundleKey() {
 			return bundleEntry.getKey();
+		}
+
+		public void startBackTrackWithoutPop() {
+			backTracking = true;
 		}
 
 		public void startBackTrack() {
@@ -718,149 +1293,137 @@ public class DependencyUtils {
 
 	private static final class DependencyResolutionState<BK extends BundleIdentifierHolder, BC> {
 		//versionless bundle id
-		protected final Entry<? extends BundleIdentifier, ? extends BC> bundleId;
+		protected final Entry<? extends BundleIdentifier, ? extends BC> versionlessBundleId;
 
 		//iterates over the looked up bundles
-		protected Iterator<? extends Entry<? extends BK, ? extends BC>> bundleIt;
-		protected BundleResolutionState<BK, BC> next;
+		protected ListIterator<? extends Entry<? extends BK, ? extends BC>> bundleIt;
 
 		protected final BundleDependencyList dependencyList;
 
-		protected Set<Entry<? extends BundleIdentifier, ? extends BC>> satisfiedBundleResults;
-
 		protected final DependencyResolutionLogger<? super BC> logger;
-		protected final Iterable<? extends Entry<? extends BK, ? extends BC>> lookedupBundles;
+		protected final List<? extends Entry<? extends BK, ? extends BC>> lookedupBundles;
 		protected final BiFunction<? super BK, ? super BC, ? extends BundleDependencyInformation> bundleDependenciesLookupFunction;
+
+		private BundleResolutionState<BK, BC> storedState;
 
 		public DependencyResolutionState(Entry<? extends BundleIdentifier, ? extends BC> bundleId,
 				Iterable<? extends Entry<? extends BK, ? extends BC>> lookedupbundles, BundleDependencyList deplist,
 				BiFunction<? super BK, ? super BC, ? extends BundleDependencyInformation> bundledependencieslookupfunction,
 				DependencyResolutionLogger<? super BC> logger) {
-			this.bundleId = bundleId;
-			this.lookedupBundles = lookedupbundles;
+			this.versionlessBundleId = bundleId;
+			this.lookedupBundles = ImmutableUtils.makeImmutableList(lookedupbundles);
 			this.dependencyList = deplist;
 			this.bundleDependenciesLookupFunction = bundledependencieslookupfunction;
 			this.logger = logger;
 		}
 
-		private void moveToNext() {
+		public void storeState(BundleResolutionState<BK, BC> bundleresolutionstate) {
+			if (TestFlag.ENABLED && this.storedState != null) {
+				throw new AssertionError();
+			}
+			this.storedState = bundleresolutionstate;
+		}
+
+		private BundleResolutionState<BK, BC> moveToNext() {
 			outer:
 			while (this.bundleIt.hasNext()) {
 				Entry<? extends BK, ? extends BC> n = this.bundleIt.next();
 				String vnumber = n.getKey().getBundleIdentifier().getVersionNumber();
-				if (dependencyList != null) {
-					for (BundleDependency bdep : dependencyList.getDependencies()) {
-						VersionRange range = bdep.getRange();
-						if (!range.includes(vnumber)) {
-							if (logger != null) {
-								logger.dependencyVersionRangeMismatch(bdep, n.getKey().getBundleIdentifier(),
-										n.getValue());
-							}
-							continue outer;
+				Set<? extends BundleDependency> dependencies = dependencyList.getDependencies();
+				for (BundleDependency bdep : dependencies) {
+					VersionRange range = bdep.getRange();
+					if (!range.includes(vnumber)) {
+						if (logger != null) {
+							logger.dependencyVersionRangeMismatch(bdep, n.getKey().getBundleIdentifier(), n.getValue());
 						}
+						continue outer;
 					}
 				}
 				BundleDependencyInformation deps = bundleDependenciesLookupFunction.apply(n.getKey(), n.getValue());
 				if (deps == null) {
 					continue;
 				}
-				next = new BundleResolutionState<>(n, deps, logger);
-				return;
+				return new BundleResolutionState<>(deps, logger, n);
 			}
 			//not found
-			next = null;
-		}
-
-		public boolean hasNextBundle() {
-			if (this.bundleIt == null) {
-				this.bundleIt = this.lookedupBundles.iterator();
-				moveToNext();
-			}
-			return next != null;
+			return null;
 		}
 
 		public BundleResolutionState<BK, BC> nextBundle() {
-			BundleResolutionState<BK, BC> res = next;
-			moveToNext();
-			return res;
+			BundleResolutionState<BK, BC> storedstate = this.storedState;
+			if (storedstate != null) {
+				this.storedState = null;
+				//flag as backtracking to continue where we left off
+				storedstate.startBackTrackWithoutPop();
+				return storedstate;
+			}
+			if (this.bundleIt == null) {
+				this.bundleIt = this.lookedupBundles.listIterator();
+			}
+			return moveToNext();
 		}
 
 		@Override
 		public String toString() {
-			return getClass().getSimpleName() + "[" + bundleId + "]";
+			return getClass().getSimpleName() + "[" + versionlessBundleId + "]";
 		}
 	}
 
+	@Deprecated
 	private static final class ResolutionResult<BK extends BundleIdentifierHolder, BC>
 			implements DependencyResolutionResult<BK, BC> {
-		private Map<Entry<? extends BundleIdentifier, ? extends BC>, Entry<? extends BK, ? extends BC>> result;
 		private Map<Entry<? extends BundleIdentifier, ? extends BC>, Entry<? extends BK, ? extends BC>> declarationOrderedResult;
 		private Map<Entry<? extends BK, ? extends BC>, Map<BK, BC>> dependencyDomainResult;
-		private LazySupplier<Void> lazyComputer;
 
-		public ResolutionResult(
-				Map<Entry<? extends BundleIdentifier, ? extends BC>, Entry<? extends BK, ? extends BC>> result,
-				Entry<? extends BundleIdentifier, ? extends BC> basewithoutversion,
-				Entry<? extends BK, ? extends BC> basebundleentry,
-				Map<BK, Supplier<BundleDependencyInformation>> dependencieslookupcache) {
-			this.result = ImmutableUtils.unmodifiableMap(result);
-			lazyComputer = LazySupplier.of(() -> {
-				computeLazily(result, basewithoutversion, basebundleentry, dependencieslookupcache);
-				return null;
-			});
+		public ResolutionResult(BK basebundle, BC basebundlecontext, DependencyDomainResolutionResult<BK, BC> result) {
+			Entry<BK, BC> basebundleentry = ImmutableUtils.makeImmutableMapEntry(basebundle, basebundlecontext);
+			Map<Entry<? extends BK, ? extends BC>, Map<BK, BC>> dependencydomainresult = new LinkedHashMap<>();
+			Map<Entry<? extends BundleIdentifier, ? extends BC>, Entry<? extends BK, ? extends BC>> declordered = new LinkedHashMap<>();
+
+			declordered.put(versionlessBundleEntry(basebundleentry), basebundleentry);
+			dependencydomainresult.put(basebundleentry, new LinkedHashMap<>());
+			collectDomainResult(basebundleentry, result, dependencydomainresult, declordered, new HashSet<>());
+
+			this.declarationOrderedResult = ImmutableUtils.unmodifiableMap(declordered);
+			this.dependencyDomainResult = ImmutableUtils.unmodifiableMap(dependencydomainresult);
 		}
 
-		private void computeLazily(
-				Map<Entry<? extends BundleIdentifier, ? extends BC>, Entry<? extends BK, ? extends BC>> result,
-				Entry<? extends BundleIdentifier, ? extends BC> basewithoutversion,
-				Entry<? extends BK, ? extends BC> basebundleentry,
-				Map<BK, Supplier<BundleDependencyInformation>> dependencieslookupcache) {
-			Map<Entry<? extends BundleIdentifier, ? extends BC>, Entry<? extends BK, ? extends BC>> declarationordered = new LinkedHashMap<>();
-			Map<Entry<? extends BK, ? extends BC>, Map<BK, BC>> dependencydomainresult = new LinkedHashMap<>();
-			LinkedList<Entry<Entry<? extends BundleIdentifier, ? extends BC>, Entry<? extends BK, ? extends BC>>> entrystack = new LinkedList<>();
-			entrystack.add(ImmutableUtils.makeImmutableMapEntry(basewithoutversion, basebundleentry));
-			while (!entrystack.isEmpty()) {
-				Entry<Entry<? extends BundleIdentifier, ? extends BC>, Entry<? extends BK, ? extends BC>> entry = entrystack
-						.removeFirst();
-				Entry<? extends BK, ? extends BC> presentbundle = entry.getValue();
-				Object resprev = declarationordered.putIfAbsent(entry.getKey(), presentbundle);
-				if (resprev != null) {
-					continue;
-				}
-				LinkedHashMap<BK, BC> domain = new LinkedHashMap<>();
-
-				BundleDependencyInformation deps = dependencieslookupcache.get(presentbundle.getKey()).get();
-				for (BundleIdentifier depbundle : deps.getDependencies().keySet()) {
-					Entry<BundleIdentifier, ? extends BC> depbundleentry = ImmutableUtils
-							.makeImmutableMapEntry(depbundle, presentbundle.getValue());
-					Entry<? extends BK, ? extends BC> depactualbundle = result.get(depbundleentry);
-					if (depactualbundle == null) {
-						//that bundle was not satisfied. probably because optional
-						continue;
-					}
-					domain.put(depactualbundle.getKey(), depactualbundle.getValue());
-					entrystack.add(ImmutableUtils.makeImmutableMapEntry(depbundleentry, depactualbundle));
-				}
-				dependencydomainresult.put(presentbundle, ImmutableUtils.unmodifiableMap(domain));
+		private static <BK extends BundleIdentifierHolder, BC> void collectDomainResult(
+				Entry<? extends BK, ? extends BC> basebundleentry, DependencyDomainResolutionResult<BK, BC> result,
+				Map<Entry<? extends BK, ? extends BC>, Map<BK, BC>> dependencydomainresult,
+				Map<Entry<? extends BundleIdentifier, ? extends BC>, Entry<? extends BK, ? extends BC>> declordered,
+				Set<Entry<? extends BK, ? extends BC>> processed) {
+			if (!processed.add(basebundleentry)) {
+				return;
 			}
-			this.declarationOrderedResult = ImmutableUtils.unmodifiableMap(declarationordered);
-			this.dependencyDomainResult = ImmutableUtils.unmodifiableMap(dependencydomainresult);
+			Map<BK, BC> depmap = dependencydomainresult.get(basebundleentry);
+
+			for (Entry<Entry<? extends BK, ? extends BC>, ? extends DependencyDomainResolutionResult<BK, BC>> directdepentry : result
+					.getDirectDependencies().entrySet()) {
+				Entry<? extends BK, ? extends BC> directdepbundleentry = directdepentry.getKey();
+				depmap.put(directdepbundleentry.getKey(), directdepbundleentry.getValue());
+				declordered.putIfAbsent(versionlessBundleEntry(directdepbundleentry), directdepbundleentry);
+				dependencydomainresult.putIfAbsent(directdepbundleentry, new LinkedHashMap<>());
+			}
+			for (Entry<Entry<? extends BK, ? extends BC>, ? extends DependencyDomainResolutionResult<BK, BC>> directdepentry : result
+					.getDirectDependencies().entrySet()) {
+				collectDomainResult(directdepentry.getKey(), directdepentry.getValue(), dependencydomainresult,
+						declordered, processed);
+			}
 		}
 
 		@Override
 		public Map<Entry<? extends BundleIdentifier, ? extends BC>, Entry<? extends BK, ? extends BC>> getResultInAnyOrder() {
-			return result;
+			return getResultInDeclarationOrder();
 		}
 
 		@Override
 		public Map<Entry<? extends BundleIdentifier, ? extends BC>, Entry<? extends BK, ? extends BC>> getResultInDeclarationOrder() {
-			lazyComputer.get();
 			return declarationOrderedResult;
 		}
 
 		@Override
 		public Map<Entry<? extends BK, ? extends BC>, ? extends Map<? extends BK, ? extends BC>> getDependencyDomainResult() {
-			lazyComputer.get();
 			return dependencyDomainResult;
 		}
 
@@ -869,7 +1432,8 @@ public class DependencyUtils {
 			StringBuilder sb = new StringBuilder();
 			sb.append(getClass().getSimpleName());
 			sb.append("[");
-			for (Iterator<Entry<? extends BK, ? extends BC>> it = result.values().iterator(); it.hasNext();) {
+			for (Iterator<Entry<? extends BK, ? extends BC>> it = getResultInAnyOrder().values().iterator(); it
+					.hasNext();) {
 				Entry<? extends BK, ? extends BC> entry = it.next();
 				sb.append(entry.getKey().getBundleIdentifier());
 				if (it.hasNext()) {
