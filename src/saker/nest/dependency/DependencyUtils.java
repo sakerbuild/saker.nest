@@ -973,15 +973,6 @@ public class DependencyUtils {
 		}
 	}
 
-	private static boolean isAllDependencyIncludesVersion(BundleDependencyList deplist, String versionnumber) {
-		for (BundleDependency dep : deplist.getDependencies()) {
-			if (!dep.getRange().includes(versionnumber)) {
-				return false;
-			}
-		}
-		return true;
-	}
-
 	private static <BK extends BundleIdentifierHolder, BC> Entry<BundleIdentifier, BC> versionlessBundleEntry(
 			Entry<? extends BK, ? extends BC> entry) {
 		return ImmutableUtils.makeImmutableMapEntry(entry.getKey().getBundleIdentifier().withoutMetaQualifiers(),

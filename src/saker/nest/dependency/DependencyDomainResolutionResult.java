@@ -50,9 +50,26 @@ public interface DependencyDomainResolutionResult<BK extends BundleIdentifierHol
 	 */
 	public Map<Entry<? extends BK, ? extends BC>, ? extends DependencyDomainResolutionResult<BK, BC>> getDirectDependencies();
 
+	/**
+	 * Gets the hash code for this dependency domain.
+	 * <p>
+	 * The hash code consists of the key entries of the {@linkplain #getDirectDependencies() direct dependencies}. The
+	 * hash code is non-transitive.
+	 * <p>
+	 * {@inheritDoc}
+	 */
 	@Override
 	public int hashCode();
 
+	/**
+	 * Checks if this dependency domain equals the argument.
+	 * <p>
+	 * The equality checks if this domain has the same direct dependencies as the argument, and the domains of those
+	 * dependencies equal as well. The equality is checked recursively for transitive dependencies, but will not cause
+	 * stack overflow.
+	 * <p>
+	 * {@inheritDoc}
+	 */
 	@Override
 	public boolean equals(Object obj);
 }
