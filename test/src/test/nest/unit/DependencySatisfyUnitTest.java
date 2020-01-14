@@ -374,7 +374,7 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				.assertSatisfiable("c-v1", "x-v1", "d-v1")//
 				.assertNotSatisfiable("a-v1")//
 		;
-		System.out.println("DifferentDomainPrivateDependencyTest");
+
 		//DifferentDomainPrivateDependencyTest with valid
 		lookup()//
 				.bundle("a-v1").depend("b", "1").depend("c", "1").build()//
@@ -434,6 +434,13 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				.bundle("p-v2").build()//
 				.assertSatisfiable("a-v1", "b-v1", "p-v2")//
 		;
+		lookup()//
+				.bundle("a-v1").depend("b", "1").dependPrivate("p", "[1,2]").build()//
+				.bundle("b-v1").dependOptional("p", "1").build()//
+				.bundle("p-v1").build()//
+				.bundle("p-v2").build()//
+				.assertSatisfiable("a-v1", "b-v1", "p-v2")//
+		;
 
 		lookup()//
 				.bundle("a-v1").depend("b", "1").dependPrivate("p", "1").build()//
@@ -445,7 +452,36 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 
 		lookup()//
 				.bundle("a-v1").depend("b", "1").dependPrivate("p", "1").build()//
+				.bundle("b-v1").dependOptional("p", "2").build()//
+				.bundle("p-v1").build()//
+				.bundle("p-v2").build()//
+				.assertSatisfiable("a-v1", "b-v1", "p-v1")//
+		;
+
+		lookup()//
+				.bundle("a-v1").depend("b", "1").dependPrivate("p", "1").build()//
 				.bundle("b-v1").dependPrivate("p", "2").build()//
+				.bundle("p-v1").build()//
+				.bundle("p-v2").build()//
+				.assertSatisfiable("a-v1", "b-v1", "p-v1", "p-v2")//
+		;
+		lookup()//
+				.bundle("a-v1").depend("b", "1").dependPrivate("p", "1").build()//
+				.bundle("b-v1").dependPrivateOptional("p", "2").build()//
+				.bundle("p-v1").build()//
+				.bundle("p-v2").build()//
+				.assertSatisfiable("a-v1", "b-v1", "p-v1", "p-v2")//
+		;
+		lookup()//
+				.bundle("a-v1").depend("b", "1").dependPrivateOptional("p", "1").build()//
+				.bundle("b-v1").dependPrivate("p", "2").build()//
+				.bundle("p-v1").build()//
+				.bundle("p-v2").build()//
+				.assertSatisfiable("a-v1", "b-v1", "p-v1", "p-v2")//
+		;
+		lookup()//
+				.bundle("a-v1").depend("b", "1").dependPrivateOptional("p", "1").build()//
+				.bundle("b-v1").dependPrivateOptional("p", "2").build()//
 				.bundle("p-v1").build()//
 				.bundle("p-v2").build()//
 				.assertSatisfiable("a-v1", "b-v1", "p-v1", "p-v2")//

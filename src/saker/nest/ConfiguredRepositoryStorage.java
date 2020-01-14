@@ -1290,7 +1290,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 					.iterator(); it.hasNext();) {
 				Entry<? extends BundleKey, DomainDependency> entry = it.next();
 				if (entry.getValue().privateScope) {
-					sb.append("<private>:");
+					sb.append("<private>: ");
 				}
 				entry.getValue().domain.toString(sb, added);
 				if (it.hasNext()) {

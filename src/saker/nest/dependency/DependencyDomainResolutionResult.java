@@ -20,6 +20,7 @@ import java.util.Map.Entry;
 
 import saker.nest.bundle.BundleIdentifierHolder;
 
+//TODO since 0.8.1
 public interface DependencyDomainResolutionResult<BK extends BundleIdentifierHolder, BC> {
 	public Map<Entry<? extends BK, ? extends BC>, ? extends DependencyDomainResolutionResult<BK, BC>> getDirectDependencies();
 }

@@ -44,6 +44,8 @@ import testing.saker.nest.util.NestIntegrationTestUtils;
  * </pre>
  */
 @SakerTest
+@SuppressWarnings("unused")
+
 public class DifferentDomainPrivateDependencyTest extends ManualLoadedRepositoryTestCase {
 	//just a random uuid
 	private static final String PROPERTY_NAME = "4880e9fe-a5db-4e71-8dc5-2bff54f00877";
@@ -143,20 +145,36 @@ public class DifferentDomainPrivateDependencyTest extends ManualLoadedRepository
 
 	public static class D1 {
 		public D1() {
-			// TODO Auto-generated constructor stub
+			try {
+				new D2();
+				throw new AssertionError();
+			} catch (LinkageError e) {
+			}
+			try {
+				new X1();
+				throw new AssertionError();
+			} catch (LinkageError e) {
+			}
 		}
 	}
 
 	public static class D2 {
 		public D2() {
-			// TODO Auto-generated constructor stub
+			try {
+				new D1();
+				throw new AssertionError();
+			} catch (LinkageError e) {
+			}
+			try {
+				new X1();
+				throw new AssertionError();
+			} catch (LinkageError e) {
+			}
 		}
 	}
 
 	@Override
 	protected void runTestOnRepo(SakerRepository repo) throws Exception {
-		// TODO Auto-generated method stub
-
 		TreeMap<String, Set<Class<?>>> bundleclasses = TestUtils.<String, Set<Class<?>>>treeMapBuilder()//
 				.put("a-v1", ObjectUtils.newHashSet(AMain.class, A1.class))//
 				.put("b-v1", ObjectUtils.newHashSet(B1.class))//

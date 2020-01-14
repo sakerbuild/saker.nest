@@ -17,7 +17,6 @@ package saker.nest.dependency;
 
 import java.security.SecureRandom;
 import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -269,7 +268,6 @@ public class DependencyUtils {
 					continue;
 				}
 
-				optional_dependencies_loop:
 				for (Entry<BundleIdentifier, ? extends BundleDependencyList> entry : optionalinfo.getDependencies()
 						.entrySet()) {
 					BundleDependencyList deplist = entry.getValue();
@@ -277,49 +275,6 @@ public class DependencyUtils {
 						continue;
 					}
 					deplist = onlyOptionals(deplist);
-					boolean privatescope = ConfiguredRepositoryStorage.isAllPrivateDependencies(deplist);
-//					if (ConfiguredRepositoryStorage.isAllPrivateDependencies(deplist)) {
-//						//the optional dependency refers to a private dependency
-//						Iterable<? extends Entry<? extends BK, ? extends BC>> lookedupbundles = cachingbundleslookupfunction
-//								.apply(entry.getKey(), bundledomain.bundleEntry.getValue());
-//						for (Entry<? extends BK, ? extends BC> depbundle : lookedupbundles) {
-//							PrivateScopeDependencyRoot<BK, BC> privatescope = new PrivateScopeDependencyRoot<>(
-//									bundledomain.bundleEntry, deplist, depbundle);
-//							Optional<DomainResult<BK, BC>> privscopeopt = privatescopedomains.get(privatescope);
-//							if (privscopeopt != null) {
-//								//it was already tried to be resolved 
-//								DomainResult<BK, BC> resolveddomain = privscopeopt.orElse(null);
-//								if (resolveddomain != null) {
-//									//the private scope is succesfully resolved.
-//									bundledomain.directDependencies.put(depbundle, resolveddomain);
-//									continue optional_dependencies_loop;
-//								}
-//								//the resolution failed already by others, don't try again
-//								continue optional_dependencies_loop;
-//							}
-//							//try resolving the private dependency
-//
-//							DomainResult<BK, BC> resolvedomain = DomainResult.newPrivateDomain(depbundle, bundledomain);
-//							BundleDependencyInformation optionaladded = BundleDependencyInformation
-//									.create(Collections.singletonMap(entry.getKey(), deplist));
-//							BundleResolutionState<BK, BC> nbundleresstate = new BundleResolutionState<>(optionaladded,
-//									logger, bundledomain.bundleEntry);
-//							satisfyBundleVersion(cachingbundleslookupfunction,
-//									cachingbundledependencieswithoutspecialslookupfunction, resolvedomain, logger,
-//									nbundleresstate, privatescopedomains);
-//							if (!nbundleresstate.isBackTracking()) {
-//								//successfully resolved it
-//								hadchange = true;
-//								bundledomain.directDependencies.put(depbundle, resolvedomain);
-//								privatescopedomains.put(privatescope, Optional.of(resolvedomain));
-//							} else {
-//								//failed to resolve 
-//								privatescopedomains.put(privatescope, Optional.empty());
-//							}
-//						}
-//						continue optional_dependencies_loop;
-//					}
-					//TODO handle private deps
 					BundleDependencyInformation optionaladded = BundleDependencyInformation
 							.create(Collections.singletonMap(entry.getKey(), deplist));
 					BundleResolutionState<BK, BC> nbundleresstate = new BundleResolutionState<>(optionaladded, logger,
