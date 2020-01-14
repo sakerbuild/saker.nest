@@ -18,9 +18,41 @@ package saker.nest.dependency;
 import java.util.Map;
 import java.util.Map.Entry;
 
+import saker.nest.bundle.BundleDependencyInformation;
 import saker.nest.bundle.BundleIdentifierHolder;
 
-//TODO since 0.8.1
+/**
+ * Interface providing access to the result of a dependency resolution.
+ * <p>
+ * The interface allows accessing the direct dependencies of an associated bundle. The each dependency may also have
+ * additional transitive dependencies. The dependencies may be recursive and circular.
+ * <p>
+ * This interface is not to be implemented by clients.
+ * 
+ * @param <BK>
+ *            The bundle key type used during resolution.
+ * @param <BC>The
+ *            bundle context type used during resolution.
+ * @see DependencyUtils#satisfyDependencyDomain
+ * @since saker.nest 0.8.1
+ */
 public interface DependencyDomainResolutionResult<BK extends BundleIdentifierHolder, BC> {
+	/**
+	 * Gets the direct dependencies of the associated bundle.
+	 * <p>
+	 * The returned map contains the resolved bundles mapped to their own dependency domains. The map has a
+	 * deterministic iteration order that is defined by the {@link BundleDependencyInformation} of the bundle.
+	 * <p>
+	 * <b>Note:</b> the returned map may containg circular transitive dependencies and can cause stack overflows if not
+	 * handled properly.
+	 * 
+	 * @return An immutable map of resolved direct dependencies.
+	 */
 	public Map<Entry<? extends BK, ? extends BC>, ? extends DependencyDomainResolutionResult<BK, BC>> getDirectDependencies();
+
+	@Override
+	public int hashCode();
+
+	@Override
+	public boolean equals(Object obj);
 }

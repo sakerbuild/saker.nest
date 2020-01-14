@@ -32,15 +32,15 @@ import testing.saker.nest.util.NestIntegrationTestUtils;
  * Testing the scenario when the same bundle is loaded multiple times with different classpath.
  * 
  * <pre>
- *            /--X1
- *           /    V private
- *      /-->B1---->D2
+ *     private/-->X1
+ *           /    V
+ *      /-->B1--->D2
  *     /       private
  * A1-/
  *    \        private
  *     \-->C1---->X1
- *           \    V private
- *            \-->D1
+ *           \    V
+ *     private\-->D1
  * </pre>
  */
 @SakerTest

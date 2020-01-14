@@ -138,6 +138,10 @@ public class DependencyUtils {
 	 * @throws IllegalArgumentException
 	 *             If the base bundle identifier doesn't have a {@linkplain BundleIdentifier#getVersionQualifier()
 	 *             version qualifier}.
+	 * @throws UnsupportedOperationException
+	 *             If any of the bundle dependencies contain private dependencies. Use
+	 *             {@link DependencyUtils#satisfyDependencyDomain(BundleIdentifierHolder, Object, BundleDependencyInformation, BiFunction, BiFunction, DependencyResolutionLogger)
+	 *             DependencyUtils.satisfyDependencyDomain} to resolve private dependencies.
 	 * @deprecated Use {@link DependencyUtils#satisfyDependencyDomain(BundleIdentifierHolder, Object, BundleDependencyInformation, BiFunction, BiFunction, DependencyResolutionLogger)
 	 *                 DependencyUtils.satisfyDependencyDomain} instead.
 	 */
@@ -146,7 +150,8 @@ public class DependencyUtils {
 			BK basebundle, BC basebundlecontext, BundleDependencyInformation basedependencyinfo,
 			BiFunction<? super BundleIdentifier, ? super BC, ? extends Iterable<? extends Entry<? extends BK, ? extends BC>>> bundleslookupfunction,
 			BiFunction<? super BK, ? super BC, ? extends BundleDependencyInformation> bundledependencieslookupfunction,
-			DependencyResolutionLogger<? super BC> logger) throws NullPointerException, IllegalArgumentException {
+			DependencyResolutionLogger<? super BC> logger)
+			throws NullPointerException, IllegalArgumentException, UnsupportedOperationException {
 		if (((querySpecialDependendyFlags(basedependencyinfo) & SPECIAL_PRIVATE) == SPECIAL_PRIVATE)) {
 			throw new UnsupportedOperationException(
 					"Private dependencies are not supported in this version: " + Versions.VERSION_STRING_FULL);
@@ -167,7 +172,83 @@ public class DependencyUtils {
 		return new ResolutionResult<>(basebundle, basebundlecontext, satisfied);
 	}
 
-	//TODO @since saker.nest 0.8.1
+	/**
+	 * Executes the dependency resolution with the given arguments.
+	 * <p>
+	 * The dependency resolution algorithm defines no methodology about findig the bundles and their dependency
+	 * information. These functionalities must be implemented by the caller and plugged in to the dependency resolution
+	 * algorithm via the argument function interface instances.
+	 * <p>
+	 * The dependency resolution algorithm is deterministic, meaning that if the inputs are the same and have the same
+	 * iteration orders, it will produce the same output.
+	 * <p>
+	 * The algorithm basically works on {@link BundleIdentifier BundleIdentifiers}, however, in order to support various
+	 * scenarios such as a bundle identifier occurring multiple times, the algorithm works with the type parameters of
+	 * <code>BK</code> (bundle key) and <code>BC</code> (bundle context). <code>BK</code> type serves as the key to the
+	 * bundle, that uniquely locates both the bundle identifier and its location in some arbitrary space. The
+	 * <code>BC</code> type serves as a transient information about the found bundle that can be used to store
+	 * information for further operations. The bundle context is later passed to the dependency lookup function.
+	 * <p>
+	 * In general, types such as {@link BundleKey} or similar should be used as a substitute for the <code>BK</code>
+	 * type parameter, and {@link BundleLookup} or other information for <code>BC</code>. Other arbitrary client
+	 * provided types may be used as well.
+	 * <p>
+	 * Both the <code>BK</code> and <code>BC</code> types should be comparable using {@linkplain Object#equals(Object)
+	 * equality}.
+	 * <p>
+	 * The dependency resolution algorithm first tries to resolve all non-optional (required) dependencies. If the
+	 * resolution of these succeed, then these dependencies will be pinned, and it will attempt to resolve the
+	 * {@linkplain BundleDependency#isOptional() optional} dependencies as well. However, the resolution of the optional
+	 * dependencies may fail, in which case it is silently ignored by the method implementation.
+	 * <p>
+	 * The dependency resolution algorithm is exhaustive, meaning that it will not fail if there is a possible
+	 * resolution of dependencies. The algorithm supports circular dependencies.
+	 * <p>
+	 * The method handles {@linkplain BundleInformation#DEPENDENCY_META_PRIVATE private} dependencies as it is defined
+	 * by the repository.
+	 * <p>
+	 * The method accepts a {@linkplain DependencyResolutionLogger logger} which will be called at different times
+	 * during the dependency resolution to notify about the current state. If the dependency resolution fails, the
+	 * caller can use the information passed to the logger to determine the cause of the failure. This method doesn't
+	 * directly report the cause, and doesn't analyze the failures by itself.
+	 * 
+	 * @param <BK>
+	 *            The bundle key type. The type should be comparable using {@linkplain Object#equals(Object) equality}.
+	 * @param <BC>
+	 *            The bundle context type. The type should be comparable using {@linkplain Object#equals(Object)
+	 *            equality}.
+	 * @param basebundle
+	 *            The root bundle to resolve the dependencies of. Must not be <code>null</code>. <br>
+	 *            If one cannot provide a root bundle identifier, as the resolution happens in a way that there's none,
+	 *            one can use the {@link #randomBundleIdentifier()} to create a unique bundle identifier that this
+	 *            function accepts. Make sure to remove logging information about the generated bundle identifier not to
+	 *            pollute the user logs.
+	 * @param basebundlecontext
+	 *            The bundle context for the root bundle.
+	 * @param basedependencyinfo
+	 *            The dependency information of the root bundle that should be resolved.
+	 * @param bundleslookupfunction
+	 *            The function that looks up the bundles for a given bundle identifier. The bundle identifier argument
+	 *            doesn't contain a {@linkplain BundleIdentifier#getVersionQualifier() version qualifier}. If the result
+	 *            iterable is backed by a {@link Map} entry set, then it is recommended that the {@link Map} returned
+	 *            from this function has a deterministic iteration order. (See {@link LinkedHashMap} or
+	 *            {@link TreeMap}.) <br>
+	 *            The returned iterable from the function may be lazily populated.
+	 * @param bundledependencieslookupfunction
+	 *            The function that looks up the dependency information for a bundle. The arguments for this function is
+	 *            the ones that were returned from the lookup function (or the root bundle key and context). The bundle
+	 *            identifier argument contains a {@linkplain BundleIdentifier#getVersionQualifier() version qualifier}.
+	 * @param logger
+	 *            The dependency resolution logger or <code>null</code> to not use one.
+	 * @return The result of the dependency resolution or <code>null</code> if the resolution failed.
+	 * @throws NullPointerException
+	 *             If the base bundle, base dependency information, bundle lookup function, or bundle dependencies
+	 *             lookup function arguments are <code>null</code>.
+	 * @throws IllegalArgumentException
+	 *             If the base bundle identifier doesn't have a {@linkplain BundleIdentifier#getVersionQualifier()
+	 *             version qualifier}.
+	 * @since saker.nest 0.8.1
+	 */
 	public static <BK extends BundleIdentifierHolder, BC> DependencyDomainResolutionResult<BK, BC> satisfyDependencyDomain(
 			BK basebundle, BC basebundlecontext, BundleDependencyInformation basedependencyinfo,
 			BiFunction<? super BundleIdentifier, ? super BC, ? extends Iterable<? extends Entry<? extends BK, ? extends BC>>> bundleslookupfunction,
