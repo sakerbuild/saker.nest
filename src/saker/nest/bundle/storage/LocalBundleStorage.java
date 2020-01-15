@@ -120,8 +120,7 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 			} else {
 				Path rootpath = Paths.get(rootparam);
 				if (!rootpath.isAbsolute()) {
-					throw new IllegalArgumentException(
-							"Local bundle storage root storage directory parameter must be absolute: " + rootparam);
+					rootpath = repository.getRepositoryStorageDirectory().resolve(rootpath);
 				}
 				storagedir = rootpath;
 			}

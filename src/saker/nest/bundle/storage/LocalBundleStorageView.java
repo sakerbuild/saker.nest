@@ -60,8 +60,11 @@ public interface LocalBundleStorageView extends BundleStorageView {
 	 * &lt;{@link RepositoryBuildEnvironment#getIdentifier() repo-id}&gt;.&lt;{@link NestBundleStorageConfiguration#PARAMETER_NEST_REPOSITORY_STORAGE_CONFIGURATION storage-name}&gt;.&lt;param&gt;
 	 * </pre>
 	 * 
-	 * The parameter value is an absolute path on the local file system that specifies the root directory that the local
-	 * storate should use to store and retrieve bundles.
+	 * The parameter value can be an absolute path on the local file system that specifies the root directory that the
+	 * local storage should use to store and retrieve bundles.
+	 * <p>
+	 * It can also be a relative path in wich case it will be resolved against the
+	 * {@linkplain RepositoryEnvironment#getRepositoryStorageDirectory() repository storage directory}.
 	 * <p>
 	 * The default value is in an implementation dependent subdirectory of the
 	 * {@linkplain RepositoryEnvironment#getRepositoryStorageDirectory() repository storage directory}.
