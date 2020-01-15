@@ -79,7 +79,6 @@ import saker.nest.bundle.lookup.BundleVersionLookupResult;
 import saker.nest.bundle.lookup.LookupKey;
 import saker.nest.bundle.lookup.MultiBundleLookup;
 import saker.nest.bundle.lookup.SimpleBundleLookupResult;
-import saker.nest.bundle.lookup.SimpleBundleVersionLookupResult;
 import saker.nest.bundle.lookup.SingleBundleLookup;
 import saker.nest.bundle.lookup.TaskLookupInfo;
 import saker.nest.bundle.storage.AbstractBundleStorage;
@@ -99,6 +98,7 @@ import saker.nest.dependency.DependencyUtils;
 import saker.nest.exc.BundleDependencyUnsatisfiedException;
 import saker.nest.exc.BundleLoadingFailedException;
 import saker.nest.meta.Versions;
+import saker.nest.utils.IdentityComparisonPair;
 import saker.nest.utils.NonSpaceIterator;
 
 public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorageConfiguration {
@@ -998,6 +998,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			unsatisfiedsuppressions.forEach(unsatisfiedexc::addSuppressed);
 			throw unsatisfiedexc;
 		}
+		System.out.println("Satisfied: " + bundleid + ": " + domainsatisfied);
 		synchronized (classLoaderLock) {
 			if (closed) {
 				throw new IllegalStateException("closed");
@@ -1042,6 +1043,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 				BundleLookup relativebundlelookup = this.lookupConfiguration
 						.findStorageViewBundleLookup(storageviewkey);
 
+				System.out.println("ConfiguredRepositoryStorage.getBundleClassLoader() " + domain);
 				NestRepositoryBundleClassLoader constructedcl = new NestRepositoryBundleClassLoader(this, domain.bundle,
 						domainbundle, dependencyclassloaders, relativebundlelookup);
 
@@ -1168,12 +1170,12 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 				ClassLoaderDomain depdomain = createClassLoaderDomainImpl(dependencies, dependencybundlekey,
 						entry.getValue(), constructeddomains);
 				boolean privateScope;
-				if (enclosingdomain == null) {
-					//when we create the root domain
-					privateScope = false;
-				} else {
-					privateScope = isAllPrivateDependencies(deplist);
-				}
+//				if (enclosingdomain == null) {
+//					//when we create the root domain
+//					privateScope = false;
+//				} else {
+				privateScope = isAllPrivateDependencies(deplist);
+//				}
 				dependencydomains.put(dependencybundlekey,
 						new ClassLoaderDomain.DomainDependency(depdomain, privateScope));
 			}
@@ -1247,12 +1249,11 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			}
 		}
 
-		private boolean equals(ClassLoaderDomain domain, Map<ClassLoaderDomain, ClassLoaderDomain> identitycheckedset) {
-			ClassLoaderDomain prev = identitycheckedset.putIfAbsent(this, domain);
-			if (prev != null) {
-				if (prev != domain) {
-					return false;
-				}
+		private boolean equals(ClassLoaderDomain domain, Set<IdentityComparisonPair<ClassLoaderDomain>> compared) {
+			if (!compared.add(new IdentityComparisonPair<>(this, domain))) {
+				return true;
+			}
+			if (this == domain) {
 				return true;
 			}
 			//we need to check
@@ -1277,7 +1278,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 				if (thisdomain.privateScope != ddomain.privateScope) {
 					return false;
 				}
-				if (!thisdomain.domain.equals(ddomain.domain, identitycheckedset)) {
+				if (!thisdomain.domain.equals(ddomain.domain, compared)) {
 					return false;
 				}
 			}
@@ -1334,7 +1335,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			ClassLoaderDomain other = (ClassLoaderDomain) obj;
 			if (!bundle.equals(other.bundle))
 				return false;
-			if (!this.equals(other, new IdentityHashMap<>())) {
+			if (!this.equals(other, new HashSet<>())) {
 				return false;
 			}
 			return true;

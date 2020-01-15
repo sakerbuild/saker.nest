@@ -210,11 +210,11 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 		;
 
 		lookup()//
-				.bundle("b1.bundle-v1").depend("dep.bundle", "1.0").build()//
-				.bundle("b2.bundle-v1").depend("dep.bundle", "1.0").build()//
-				.bundle("dep.bundle-v1.0").build()//
+				.bundle("b1.bundle-v1").depend("dep.bundle", "1").build()//
+				.bundle("b2.bundle-v1").depend("dep.bundle", "1").build()//
+				.bundle("dep.bundle-v1").build()//
 				.assertMultiSatisfiable(new String[] { "b1.bundle-v1", "b2.bundle-v1" },
-						new String[] { "b1.bundle-v1", "b2.bundle-v1", "dep.bundle-v1.0" })//
+						new String[] { "b1.bundle-v1", "b2.bundle-v1", "dep.bundle-v1" })//
 		;
 		lookup()//
 				.bundle("first.bundle-v1").depend("dep.bundle", "1").depend("intermediate.bundle", "1").build()//
@@ -251,13 +251,14 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 		;
 
 		//circular private
+		System.out.println("Circular private");
 		lookup()//
-				.bundle("first.bundle-v1").dependPrivate("second.bundle", "1.0").build()//
-				.bundle("second.bundle-v1.0").dependPrivate("third.bundle", "1.0").build()//
-				.bundle("third.bundle-v1.0").dependPrivate("first.bundle", "1").build()//
-				.assertSatisfiable("first.bundle-v1", "second.bundle-v1.0", "third.bundle-v1.0")//
-				.assertSatisfiable("second.bundle-v1.0", "third.bundle-v1.0", "first.bundle-v1")//
-				.assertSatisfiable("third.bundle-v1.0", "first.bundle-v1", "second.bundle-v1.0")//
+				.bundle("first.bundle-v1").dependPrivate("second.bundle", "1").build()//
+				.bundle("second.bundle-v1").dependPrivate("third.bundle", "1").build()//
+				.bundle("third.bundle-v1").dependPrivate("first.bundle", "1").build()//
+				.assertSatisfiable("first.bundle-v1", "second.bundle-v1", "third.bundle-v1")//
+				.assertSatisfiable("second.bundle-v1", "third.bundle-v1", "first.bundle-v1")//
+				.assertSatisfiable("third.bundle-v1", "first.bundle-v1", "second.bundle-v1")//
 		;
 
 		//alternating circular private
@@ -387,7 +388,7 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				.bundle("x-v1").depend("d", "[1, 2]").build()//
 				.assertSatisfiable("b-v1", "x-v1", "d-v2")//
 				.assertSatisfiable("c-v1", "x-v1", "d-v1")//
-				.assertSatisfiable("a-v1", "b-v1", "c-v1", "x-v1", "d-v2", "d-v1")//
+				.assertRecurrSatisfiable(false,"a-v1", "b-v1", "c-v1", "x-v1", "d-v2", "d-v1")//
 		;
 
 		lookup()//
@@ -515,6 +516,10 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 			DependencyDomainResolutionResult<?, ?> res = satisfy(bundleid);
 			assertNonNull(res, "Failed to satisfy: " + bundleid);
 			printSatisfiedDomain(bundleid, res);
+			assertNonRecurringDomainsImpl(bundleid, res);
+		}
+
+		private void assertNonRecurringDomainsImpl(String bundleid, DependencyDomainResolutionResult<?, ?> res) {
 			HashMap<BundleIdentifier, DependencyDomainResolutionResult<?, ?>> domains = new HashMap<>();
 			domains.put(BundleIdentifier.valueOf(bundleid), res);
 			assertNonRecurringDomainsImpl(res, domains);
@@ -527,11 +532,13 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				BundleIdentifier bid = entry.getKey().getKey().getBundleIdentifier();
 				DependencyDomainResolutionResult<?, ?> prev = found.putIfAbsent(bid, entry.getValue());
 				if (prev != null) {
-					if (prev != entry.getValue()) {
+					if (!prev.equals(entry.getValue())) {
+//					if (prev != entry.getValue()) {
 						System.out.println("First: ");
 						printSatisfiedDomain(bid.toString(), prev);
 						System.out.println("Second: ");
 						printSatisfiedDomain(bid.toString(), entry.getValue());
+						System.out.println("The domains equal: " + prev.equals(entry.getValue()));
 						throw new AssertionError("Duplicate domains for: " + bid);
 					}
 				} else {
@@ -550,11 +557,16 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 			return this;
 		}
 
-		public LookupContext assertSatisfiable(String bundleid, String... expectedbundles) {
+		public LookupContext assertRecurrSatisfiable(boolean checkrecurring, String bundleid,
+				String... expectedbundles) {
 			DependencyDomainResolutionResult<?, ?> satisfied = satisfy(bundleid);
 			assertNonNull(satisfied, "Failed to satisfy: " + bundleid);
 			printSatisfiedDomain(bundleid, satisfied);
 			Set<BundleIdentifier> bundleidset = bundleIdSetOf(bundleid, expectedbundles);
+
+			if (checkrecurring) {
+				assertNonRecurringDomainsImpl(bundleid, satisfied);
+			}
 
 			assertResults(satisfied, bundleidset, getBaseBundleEntry(BundleIdentifier.valueOf(bundleid)));
 
@@ -567,6 +579,10 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 			}
 
 			return this;
+		}
+
+		public LookupContext assertSatisfiable(String bundleid, String... expectedbundles) {
+			return assertRecurrSatisfiable(true, bundleid, expectedbundles);
 		}
 
 		private static BundleIdentifier[] toBundleIdentifiers(DependencyDomainResolutionResult<?, ?> satisfied,

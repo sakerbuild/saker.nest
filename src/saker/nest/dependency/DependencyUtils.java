@@ -54,6 +54,7 @@ import saker.nest.bundle.DependencyConstraintConfiguration;
 import saker.nest.bundle.lookup.BundleLookup;
 import saker.nest.exc.InvalidNestBundleException;
 import saker.nest.meta.Versions;
+import saker.nest.utils.IdentityComparisonPair;
 import saker.nest.version.VersionRange;
 import testing.saker.nest.TestFlag;
 
@@ -442,12 +443,11 @@ public class DependencyUtils {
 		}
 
 		private boolean equals(DependencyDomainResolutionResultImpl<?, ?> domain,
-				Map<DependencyDomainResolutionResultImpl<?, ?>, DependencyDomainResolutionResultImpl<?, ?>> identitycheckedset) {
-			DependencyDomainResolutionResult<?, ?> prev = identitycheckedset.putIfAbsent(this, domain);
-			if (prev != null) {
-				if (prev != domain) {
-					return false;
-				}
+				Set<IdentityComparisonPair<DependencyDomainResolutionResultImpl<?, ?>>> compared) {
+			if (!compared.add(new IdentityComparisonPair<>(this, domain))) {
+				return true;
+			}
+			if (this == domain) {
 				return true;
 			}
 			//we need to check
@@ -471,7 +471,7 @@ public class DependencyUtils {
 				}
 				DependencyDomainResolutionResultImpl<?, ?> thisdomain = thisentry.getValue();
 				DependencyDomainResolutionResultImpl<?, ?> ddomain = dentry.getValue();
-				if (!thisdomain.equals(ddomain, identitycheckedset)) {
+				if (!thisdomain.equals(ddomain, compared)) {
 					return false;
 				}
 			}
@@ -490,7 +490,7 @@ public class DependencyUtils {
 			if (getClass() != obj.getClass())
 				return false;
 			DependencyDomainResolutionResultImpl<?, ?> other = (DependencyDomainResolutionResultImpl<?, ?>) obj;
-			if (!this.equals(other, new IdentityHashMap<>())) {
+			if (!this.equals(other, new HashSet<>())) {
 				return false;
 			}
 			return true;
@@ -883,6 +883,7 @@ public class DependencyUtils {
 						return true;
 					}
 				}
+				System.out.println("DependencyUtils.satisfy() " + pinsnapshot);
 				usedomain = DomainResult.newPrivateSubDomain(domain, bundleresolutionstate.bundleEntry);
 				privatescopedomains.put(privscope, Optional.of(usedomain));
 
