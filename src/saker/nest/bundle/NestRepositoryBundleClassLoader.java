@@ -49,8 +49,8 @@ import saker.nest.bundle.lookup.BundleLookup;
 public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader implements NestBundleClassLoader {
 
 	public static final class DependentClassLoader {
-		protected final NestRepositoryBundleClassLoader classLoader;
-		protected final boolean privateScope;
+		public final NestRepositoryBundleClassLoader classLoader;
+		public final boolean privateScope;
 
 		public DependentClassLoader(NestRepositoryBundleClassLoader classLoader, boolean privateScope) {
 			this.classLoader = classLoader;
@@ -128,6 +128,14 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 
 	public byte[] getSharedBundleHashWithClassPathDependencies() {
 		return hashWithClassPathDependencies.get();
+	}
+
+	public Map<BundleKey, DependentClassLoader> getDependencyClassLoaders() {
+		return dependencyClassLoaders;
+	}
+
+	public BundleKey getBundleKey() {
+		return bundleKey;
 	}
 
 	/**

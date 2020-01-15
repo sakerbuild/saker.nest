@@ -30,10 +30,7 @@ import saker.build.thirdparty.saker.util.classloader.ClassLoaderResolver;
 import saker.build.thirdparty.saker.util.classloader.ClassLoaderResolverRegistry;
 import saker.build.thirdparty.saker.util.classloader.SingleClassLoaderResolver;
 import saker.nest.bundle.BundleIdentifier;
-import saker.nest.bundle.NestBundleClassLoader;
-import saker.nest.bundle.NestRepositoryBundle;
 import saker.nest.bundle.NestRepositoryBundleClassLoader;
-import saker.nest.exc.BundleLoadingFailedException;
 import saker.nest.scriptinfo.reflection.ReflectionExternalScriptInformationProvider;
 import testing.saker.nest.TestFlag;
 
@@ -49,46 +46,32 @@ public class NestBuildRepositoryImpl implements BuildRepository {
 	private final ClassLoaderResolver bundlesClassLoaderResolver = new ClassLoaderResolver() {
 		@Override
 		public String getClassLoaderIdentifier(ClassLoader classloader) {
-			if (classloader instanceof NestBundleClassLoader) {
-				NestBundleClassLoader nestbundlecl = (NestBundleClassLoader) classloader;
-				NestRepositoryBundle nestbundle = nestbundlecl.getBundle();
-				BundleIdentifier bundleid = nestbundle.getBundleIdentifier();
-				String storageid = configuredStorage.getStorageIdentifier(nestbundlecl);
-				if (storageid != null) {
-					String hash = StringUtils.toHexString(nestbundlecl.getBundleHashWithClassPathDependencies());
-					return storageid + NestRepositoryImpl.CHAR_CL_IDENITIFER_SEPARATOR + bundleid.toString()
-							+ NestRepositoryImpl.CHAR_CL_IDENITIFER_SEPARATOR + hash;
-				}
+			if (!(classloader instanceof NestRepositoryBundleClassLoader)) {
+				return null;
 			}
-			return null;
+			NestRepositoryBundleClassLoader nestbundlecl = (NestRepositoryBundleClassLoader) classloader;
+			String reconstrid = configuredStorage.getClassLoaderReconstructionIdentifier(nestbundlecl);
+			if (reconstrid == null) {
+				return null;
+			}
+			String hash = StringUtils.toHexString(nestbundlecl.getBundleHashWithClassPathDependencies());
+			return reconstrid + NestRepositoryImpl.CHAR_CL_IDENITIFER_SEPARATOR + hash;
 		}
 
 		@Override
 		public ClassLoader getClassLoaderForIdentifier(String identifier) {
 			int idx = identifier.indexOf(NestRepositoryImpl.CHAR_CL_IDENITIFER_SEPARATOR);
-			int idx2 = identifier.indexOf(NestRepositoryImpl.CHAR_CL_IDENITIFER_SEPARATOR, idx + 1);
-			String storageid = identifier.substring(0, idx);
-			String bundleidstr = identifier.substring(idx + 1, idx2);
+			String reconstrid = identifier.substring(0, idx);
+			String hashstr = identifier.substring(idx + 1);
 
-			BundleIdentifier bundleid;
-			try {
-				bundleid = BundleIdentifier.valueOf(bundleidstr);
-			} catch (IllegalArgumentException e) {
+			NestRepositoryBundleClassLoader bundlecl = configuredStorage
+					.getBundleClassLoaderForReconstructionIdentifier(reconstrid);
+			if (bundlecl == null) {
 				return null;
 			}
-
-			try {
-				NestRepositoryBundleClassLoader bundlecl = configuredStorage
-						.getBundleClassLoaderForStorageIdentifier(storageid, bundleid);
-				if (bundlecl == null) {
-					return null;
-				}
-				if (Objects.equals(identifier.substring(idx2 + 1),
-						StringUtils.toHexString(bundlecl.getSharedBundleHashWithClassPathDependencies()))) {
-					return bundlecl;
-				}
-			} catch (BundleLoadingFailedException e) {
-				System.err.println("Failed to load bundle: " + bundleid);
+			if (Objects.equals(hashstr,
+					StringUtils.toHexString(bundlecl.getSharedBundleHashWithClassPathDependencies()))) {
+				return bundlecl;
 			}
 			return null;
 		}

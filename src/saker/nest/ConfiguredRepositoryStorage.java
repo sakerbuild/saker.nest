@@ -66,7 +66,6 @@ import saker.nest.bundle.BundleIdentifier;
 import saker.nest.bundle.BundleInformation;
 import saker.nest.bundle.BundleKey;
 import saker.nest.bundle.DependencyConstraintConfiguration;
-import saker.nest.bundle.NestBundleClassLoader;
 import saker.nest.bundle.NestBundleStorageConfiguration;
 import saker.nest.bundle.NestRepositoryBundle;
 import saker.nest.bundle.NestRepositoryBundleClassLoader;
@@ -98,6 +97,7 @@ import saker.nest.dependency.DependencyUtils;
 import saker.nest.exc.BundleDependencyUnsatisfiedException;
 import saker.nest.exc.BundleLoadingFailedException;
 import saker.nest.meta.Versions;
+import saker.nest.thirdparty.org.json.JSONObject;
 import saker.nest.utils.IdentityComparisonPair;
 import saker.nest.utils.NonSpaceIterator;
 
@@ -129,8 +129,10 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 	private final Map<LookupKey, BundleLookup> lookupKeyBundleLookups = new HashMap<>();
 	private final Map<BundleLookup, String> bundleLookupStorageIdentifiers = new IdentityHashMap<>();
 
-	private final transient Map<String, AbstractBundleStorageView> storageViewStringIdentifierStorages = new TreeMap<>();
+	private final transient Map<String, AbstractBundleStorageView> stringIdentifierStorageViews = new TreeMap<>();
+	private final transient Map<AbstractBundleStorageView, String> storageViewStringIdentifiers = new HashMap<>();
 	private final transient Map<StorageViewKey, AbstractBundleStorageView> storageViewKeyStorageViews = new HashMap<>();
+	private final transient Map<StorageViewKey, String> storageViewKeyStringIdentifiers = new HashMap<>();
 
 	private final Map<TaskName, TaskName> pinnedTaskVersion = new TreeMap<>();
 
@@ -298,8 +300,10 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			initinfo.storageView = storageview;
 			initinfo.storageViewStringIdentifier = storageviewstringid;
 
-			storageViewStringIdentifierStorages.put(storageviewstringid, storageview);
+			stringIdentifierStorageViews.put(storageviewstringid, storageview);
+			storageViewStringIdentifiers.put(storageview, storageviewstringid);
 			storageViewKeyStorageViews.put(storageview.getStorageViewKey(), storageview);
+			storageViewKeyStringIdentifiers.put(storageview.getStorageViewKey(), storageviewstringid);
 		}
 
 		this.lookupConfiguration = createBundleLookupForConfiguration(storageconfig, namedstorageinitializers);
@@ -387,23 +391,117 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 		return lookupConfiguration;
 	}
 
-	public String getStorageIdentifier(NestBundleClassLoader nestbundlecl) {
-		return bundleLookupStorageIdentifiers.get(nestbundlecl.getRelativeBundleLookup());
+	public String getClassLoaderReconstructionIdentifier(NestRepositoryBundleClassLoader nestbundlecl) {
+		ClassLoaderDomain cldomain = ClassLoaderDomain.fromClassLoader(nestbundlecl);
+		return domainToReconstructionString(cldomain);
 	}
 
-	public NestRepositoryBundleClassLoader getBundleClassLoaderForStorageIdentifier(String storageidentifier,
-			BundleIdentifier bundleid) throws BundleLoadingFailedException {
-		AbstractBundleStorageView storage = storageViewStringIdentifierStorages.get(storageidentifier);
-		if (storage == null) {
+	public NestRepositoryBundleClassLoader getBundleClassLoaderForReconstructionIdentifier(String reconstructionid) {
+		ClassLoaderDomain domain = domainFromReconstructionString(reconstructionid);
+		if (domain == null) {
 			return null;
 		}
-		AbstractNestRepositoryBundle bundle = storage.getBundle(bundleid);
-		AbstractBundleLookup relativelookup = storageKeyIdentifierBundleLookups.get(storageidentifier);
+		synchronized (classLoaderLock) {
+			return createDomainClassLoaderLockedImpl(domain);
+		}
+	}
+
+	private String bundleKeyToReconstructionIdentifier(BundleKey bk) {
+		return bk.getBundleIdentifier() + "|" + storageViewKeyStringIdentifiers.get(bk.getStorageViewKey());
+	}
+
+	private BundleKey reconstructionIdentifierToBundleKey(String reconstid) {
+		int idx = reconstid.indexOf('|');
+		if (idx < 0) {
+			return null;
+		}
 		try {
-			return getBundleClassLoader(bundle, relativelookup, storage);
-		} catch (BundleDependencyUnsatisfiedException e) {
-			return null;
+			AbstractBundleStorageView storageview = stringIdentifierStorageViews.get(reconstid.substring(idx + 1));
+			if (storageview == null) {
+				return null;
+			}
+			BundleIdentifier bundleid = BundleIdentifier.valueOf(reconstid.substring(0, idx));
+			return BundleKey.create(storageview.getStorageViewKey(), bundleid);
+		} catch (IllegalArgumentException e) {
 		}
+		return null;
+	}
+
+	private String domainToReconstructionString(ClassLoaderDomain domain) {
+		JSONObject obj = new JSONObject();
+		obj.put("@root", bundleKeyToReconstructionIdentifier(domain.bundle));
+		domainToReconstructionJSONImpl(domain, obj, new HashMap<>());
+		return obj.toString();
+	}
+
+	private void domainToReconstructionJSONImpl(ClassLoaderDomain domain, JSONObject obj,
+			Map<ClassLoaderDomain, Integer> backreferences) {
+		int backrefnum = backreferences.size();
+		Integer prevbackref = backreferences.putIfAbsent(domain, backrefnum);
+		if (prevbackref != null) {
+			obj.put("@r", prevbackref.intValue());
+			return;
+		}
+		obj.put("@i", backrefnum);
+		for (Entry<BundleKey, ClassLoaderDomain.DomainDependency> entry : domain.dependencies.entrySet()) {
+			JSONObject depobj = new JSONObject();
+			if (entry.getValue().privateScope) {
+				depobj.put("@p", 1);
+			}
+			obj.put(bundleKeyToReconstructionIdentifier(entry.getKey()), depobj);
+			domainToReconstructionJSONImpl(entry.getValue().domain, depobj, backreferences);
+		}
+	}
+
+	private ClassLoaderDomain domainFromReconstructionString(String str) {
+		JSONObject json;
+		try {
+			json = new JSONObject(str);
+			String rootbkreconstructionid = json.getString("@root");
+			BundleKey rootbk = reconstructionIdentifierToBundleKey(rootbkreconstructionid);
+			if (rootbk == null) {
+				return null;
+			}
+			return domainFromReconstructionJSON(json, rootbk, new TreeMap<>());
+		} catch (Exception e) {
+			System.err.println(e);
+		}
+		return null;
+	}
+
+	private ClassLoaderDomain domainFromReconstructionJSON(JSONObject obj, BundleKey bundlekey,
+			Map<Integer, ClassLoaderDomain> refs) {
+		int backref = obj.optInt("@r", -1);
+		if (backref >= 0) {
+			return refs.get(backref);
+		}
+		int objid = obj.getInt("@i");
+		LinkedHashMap<BundleKey, ClassLoaderDomain.DomainDependency> deps = new LinkedHashMap<>();
+		ClassLoaderDomain result = new ClassLoaderDomain(bundlekey, deps);
+		refs.put(objid, result);
+
+		Iterator<String> keyit = obj.keys();
+		while (keyit.hasNext()) {
+			String k = keyit.next();
+			if (k.isEmpty()) {
+				return null;
+			}
+			if (k.charAt(0) == '@') {
+				//control field
+				continue;
+			}
+			BundleKey depbundlekey = reconstructionIdentifierToBundleKey(k);
+			if (depbundlekey == null) {
+				return null;
+			}
+			JSONObject depobj = obj.getJSONObject(k);
+			ClassLoaderDomain depcldomain = domainFromReconstructionJSON(depobj, depbundlekey, refs);
+			if (depcldomain == null) {
+				return null;
+			}
+			deps.put(depbundlekey, new ClassLoaderDomain.DomainDependency(depcldomain, depobj.optInt("@p", -1) == 1));
+		}
+		return result;
 	}
 
 	public NestRepositoryBundleClassLoader getBundleClassLoader(BundleIdentifier bundleid)
@@ -524,7 +622,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 				throw new IllegalStateException("Multiple detect changes call without handling it.");
 			}
 			Map<AbstractBundleStorageView, Object> detectedchanges = new LinkedHashMap<>();
-			for (AbstractBundleStorageView storage : storageViewStringIdentifierStorages.values()) {
+			for (AbstractBundleStorageView storage : stringIdentifierStorageViews.values()) {
 				Object detected = storage.detectChanges(pathconfig);
 				if (detected != null) {
 					detectedchanges.put(storage, detected);
@@ -556,15 +654,25 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 				//reset the storage view key map as they can be modified in case of changes
 				Map<String, AbstractBundleStorageView> nstorageviewstringidstorages = new TreeMap<>();
 				Map<StorageViewKey, AbstractBundleStorageView> nstoragekeybundlestorageviews = new HashMap<>();
+				Map<AbstractBundleStorageView, String> nstorageviewstringidentifiers = new HashMap<>();
+				Map<StorageViewKey, String> nstoragekeystringidentfiers = new HashMap<>();
 				for (AbstractBundleStorageView storageview : storageViewKeyStorageViews.values()) {
-					nstoragekeybundlestorageviews.put(storageview.getStorageViewKey(), storageview);
 					String nstorageviewstringid = createStorageViewStringIdentifier(storageview);
+					StorageViewKey storageviewkey = storageview.getStorageViewKey();
+
+					nstoragekeybundlestorageviews.put(storageviewkey, storageview);
 					nstorageviewstringidstorages.put(nstorageviewstringid, storageview);
+					nstorageviewstringidentifiers.put(storageview, nstorageviewstringid);
+					nstoragekeystringidentfiers.put(storageviewkey, nstorageviewstringid);
 				}
 				storageViewKeyStorageViews.clear();
 				storageViewKeyStorageViews.putAll(nstoragekeybundlestorageviews);
-				storageViewStringIdentifierStorages.clear();
-				storageViewStringIdentifierStorages.putAll(nstorageviewstringidstorages);
+				storageViewKeyStringIdentifiers.clear();
+				storageViewKeyStringIdentifiers.putAll(nstoragekeystringidentfiers);
+				stringIdentifierStorageViews.clear();
+				stringIdentifierStorageViews.putAll(nstorageviewstringidstorages);
+				storageViewStringIdentifiers.clear();
+				storageViewStringIdentifiers.putAll(nstorageviewstringidentifiers);
 
 			}
 		}
@@ -929,9 +1037,11 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 
 	private NestRepositoryBundleClassLoader getBundleClassLoader(AbstractNestRepositoryBundle bundle,
 			AbstractBundleLookup bundlelookupconfig, BundleStorageView bundlestorage) {
-		NestRepositoryBundleClassLoader presentcl = classLoaders.get(bundle);
-		if (presentcl != null) {
-			return presentcl;
+		{
+			NestRepositoryBundleClassLoader presentcl = classLoaders.get(bundle);
+			if (presentcl != null) {
+				return presentcl;
+			}
 		}
 		BundleIdentifier bundleid = bundle.getBundleIdentifier();
 		BundleKey bundlekey = new SimpleBundleKey(bundleid, bundlestorage.getStorageViewKey());
@@ -998,86 +1108,104 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			unsatisfiedsuppressions.forEach(unsatisfiedexc::addSuppressed);
 			throw unsatisfiedexc;
 		}
-		System.out.println("Satisfied: " + bundleid + ": " + domainsatisfied);
+		ClassLoaderDomain rootbundledomain = createClassLoaderDomain(bundlekey, domainsatisfied);
+
+		{
+			NestRepositoryBundleClassLoader presentdomaincl = domainClassLoaders.get(rootbundledomain);
+			if (presentdomaincl != null) {
+				classLoaders.putIfAbsent(bundle, presentdomaincl);
+				return presentdomaincl;
+			}
+			NestRepositoryBundleClassLoader presentcl = classLoaders.get(bundle);
+			if (presentcl != null) {
+				return presentcl;
+			}
+		}
+
 		synchronized (classLoaderLock) {
 			if (closed) {
 				throw new IllegalStateException("closed");
 			}
-			presentcl = classLoaders.get(bundle);
-			if (presentcl != null) {
-				return presentcl;
-			}
-
-			ClassLoaderDomain rootbundledomain = createClassLoaderDomain(bundlekey, domainsatisfied);
 			{
-				NestRepositoryBundleClassLoader presentdomaincl = domainClassLoaders.get(rootbundledomain);
-				if (presentdomaincl != null) {
-					//this shouldn't happen, but check just in case
-					classLoaders.putIfAbsent(bundle, presentdomaincl);
-					return presentdomaincl;
+				NestRepositoryBundleClassLoader presentcl = classLoaders.get(bundle);
+				if (presentcl != null) {
+					return presentcl;
 				}
 			}
 
-			Map<ClassLoaderDomain, NestRepositoryBundleClassLoader> constructeddomaincls = new HashMap<>();
-			Map<ClassLoaderDomain, Map<BundleKey, DependentClassLoader>> constructedcldependencies = new HashMap<>();
-			for (ClassLoaderDomain domain : rootbundledomain.getAllDomains()) {
-				NestRepositoryBundleClassLoader presentdomaincl = domainClassLoaders.get(domain);
-				if (presentdomaincl != null) {
-					continue;
-				}
-				if (constructeddomaincls.containsKey(domain)) {
-					//already constructed
-					continue;
-				}
-				StorageViewKey storageviewkey = domain.bundle.getStorageViewKey();
-				AbstractBundleStorageView domainbundlestorage = storageViewKeyStorageViews.get(storageviewkey);
-				AbstractNestRepositoryBundle domainbundle;
-				try {
-					domainbundle = domainbundlestorage.getBundle(domain.bundle.getBundleIdentifier());
-				} catch (NullPointerException | BundleLoadingFailedException e) {
-					throw new AssertionError("Failed to retrieve previously resolved bundle. ("
-							+ domain.bundle.getBundleIdentifier() + ")", e);
-				}
-				Map<BundleKey, DependentClassLoader> dependencyclassloaders = new LinkedHashMap<>();
+			NestRepositoryBundleClassLoader result = createDomainClassLoaderLockedImpl(rootbundledomain);
 
-				BundleLookup relativebundlelookup = this.lookupConfiguration
-						.findStorageViewBundleLookup(storageviewkey);
-
-				System.out.println("ConfiguredRepositoryStorage.getBundleClassLoader() " + domain);
-				NestRepositoryBundleClassLoader constructedcl = new NestRepositoryBundleClassLoader(this, domain.bundle,
-						domainbundle, dependencyclassloaders, relativebundlelookup);
-
-				constructedcldependencies.put(domain, dependencyclassloaders);
-				constructeddomaincls.put(domain, constructedcl);
-			}
-
-			for (Entry<ClassLoaderDomain, Map<BundleKey, DependentClassLoader>> entry : constructedcldependencies
-					.entrySet()) {
-				Map<BundleKey, DependentClassLoader> cldepmap = entry.getValue();
-				for (Entry<? extends BundleKey, ClassLoaderDomain.DomainDependency> depentry : entry
-						.getKey().dependencies.entrySet()) {
-					if (cldepmap.containsKey(depentry.getKey())) {
-						continue;
-					}
-					NestRepositoryBundleClassLoader domaincl = domainClassLoaders.get(depentry.getValue().domain);
-					if (domaincl == null) {
-						domaincl = constructeddomaincls.get(depentry.getValue().domain);
-					}
-					cldepmap.put(depentry.getKey(),
-							new DependentClassLoader(domaincl, depentry.getValue().privateScope));
-				}
-			}
-
-			NestRepositoryBundleClassLoader result = constructeddomaincls.get(rootbundledomain);
-
-			domainClassLoaders.putAll(constructeddomaincls);
-
-			if (result == null) {
-				throw new AssertionError("Failed to retrieve classloader. " + bundleid);
-			}
 			classLoaders.putIfAbsent(bundle, result);
 			return result;
 		}
+	}
+
+	/**
+	 * Locked on {@link #classLoaderLock}.
+	 */
+	private NestRepositoryBundleClassLoader createDomainClassLoaderLockedImpl(ClassLoaderDomain rootbundledomain) {
+		{
+			NestRepositoryBundleClassLoader presentrootdomaincl = domainClassLoaders.get(rootbundledomain);
+			if (presentrootdomaincl != null) {
+				return presentrootdomaincl;
+			}
+		}
+
+		Map<ClassLoaderDomain, NestRepositoryBundleClassLoader> constructeddomaincls = new HashMap<>();
+		Map<ClassLoaderDomain, Map<BundleKey, DependentClassLoader>> constructedcldependencies = new HashMap<>();
+		for (ClassLoaderDomain domain : rootbundledomain.getAllDomains()) {
+			NestRepositoryBundleClassLoader presentdomaincl = domainClassLoaders.get(domain);
+			if (presentdomaincl != null) {
+				continue;
+			}
+			if (constructeddomaincls.containsKey(domain)) {
+				//already constructed
+				continue;
+			}
+			StorageViewKey storageviewkey = domain.bundle.getStorageViewKey();
+			AbstractBundleStorageView domainbundlestorage = storageViewKeyStorageViews.get(storageviewkey);
+			AbstractNestRepositoryBundle domainbundle;
+			try {
+				domainbundle = domainbundlestorage.getBundle(domain.bundle.getBundleIdentifier());
+			} catch (NullPointerException | BundleLoadingFailedException e) {
+				throw new AssertionError(
+						"Failed to retrieve previously resolved bundle. (" + domain.bundle.getBundleIdentifier() + ")",
+						e);
+			}
+			Map<BundleKey, DependentClassLoader> dependencyclassloaders = new LinkedHashMap<>();
+
+			BundleLookup relativebundlelookup = this.lookupConfiguration.findStorageViewBundleLookup(storageviewkey);
+
+			NestRepositoryBundleClassLoader constructedcl = new NestRepositoryBundleClassLoader(this, domain.bundle,
+					domainbundle, dependencyclassloaders, relativebundlelookup);
+
+			constructedcldependencies.put(domain, dependencyclassloaders);
+			constructeddomaincls.put(domain, constructedcl);
+		}
+
+		for (Entry<ClassLoaderDomain, Map<BundleKey, DependentClassLoader>> entry : constructedcldependencies
+				.entrySet()) {
+			Map<BundleKey, DependentClassLoader> cldepmap = entry.getValue();
+			for (Entry<? extends BundleKey, ClassLoaderDomain.DomainDependency> depentry : entry.getKey().dependencies
+					.entrySet()) {
+				if (cldepmap.containsKey(depentry.getKey())) {
+					continue;
+				}
+				NestRepositoryBundleClassLoader domaincl = domainClassLoaders.get(depentry.getValue().domain);
+				if (domaincl == null) {
+					domaincl = constructeddomaincls.get(depentry.getValue().domain);
+				}
+				cldepmap.put(depentry.getKey(), new DependentClassLoader(domaincl, depentry.getValue().privateScope));
+			}
+		}
+
+		NestRepositoryBundleClassLoader result = constructeddomaincls.get(rootbundledomain);
+		if (result == null) {
+			throw new AssertionError("Failed to retrieve classloader. ");
+		}
+
+		domainClassLoaders.putAll(constructeddomaincls);
+		return result;
 	}
 
 	private static Set<BundleKey> toBundleKeySet(BundleVersionLookupResult lookedupversions) {
@@ -1129,11 +1257,10 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 
 	private <BC> ClassLoaderDomain createClassLoaderDomain(BundleKey domainbundleid,
 			DependencyDomainResolutionResult<BundleKey, BC> dependencies) {
-		return createClassLoaderDomainImpl(null, domainbundleid, dependencies, new HashMap<>());
+		return createClassLoaderDomainImpl(domainbundleid, dependencies, new HashMap<>());
 	}
 
-	private <BC> ClassLoaderDomain createClassLoaderDomainImpl(
-			DependencyDomainResolutionResult<BundleKey, BC> enclosingdomain, BundleKey enclosingbundleid,
+	private <BC> ClassLoaderDomain createClassLoaderDomainImpl(BundleKey enclosingbundleid,
 			DependencyDomainResolutionResult<BundleKey, BC> dependencies,
 			Map<Entry<DependencyDomainResolutionResult<BundleKey, BC>, BundleKey>, ClassLoaderDomain> constructeddomains) {
 		Entry<DependencyDomainResolutionResult<BundleKey, BC>, BundleKey> lookupentry = ImmutableUtils
@@ -1167,15 +1294,10 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 							+ " in " + enclosingbundleid);
 				}
 
-				ClassLoaderDomain depdomain = createClassLoaderDomainImpl(dependencies, dependencybundlekey,
-						entry.getValue(), constructeddomains);
+				ClassLoaderDomain depdomain = createClassLoaderDomainImpl(dependencybundlekey, entry.getValue(),
+						constructeddomains);
 				boolean privateScope;
-//				if (enclosingdomain == null) {
-//					//when we create the root domain
-//					privateScope = false;
-//				} else {
 				privateScope = isAllPrivateDependencies(deplist);
-//				}
 				dependencydomains.put(dependencybundlekey,
 						new ClassLoaderDomain.DomainDependency(depdomain, privateScope));
 			}
@@ -1227,11 +1349,34 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 		/**
 		 * Maps bundle keys to the nature of privateness of the dependency.
 		 */
-		protected final LinkedHashMap<? extends BundleKey, DomainDependency> dependencies;
+		protected final LinkedHashMap<BundleKey, DomainDependency> dependencies;
 
-		public ClassLoaderDomain(BundleKey bundle, LinkedHashMap<? extends BundleKey, DomainDependency> dependencies) {
+		public ClassLoaderDomain(BundleKey bundle, LinkedHashMap<BundleKey, DomainDependency> dependencies) {
 			this.bundle = bundle;
 			this.dependencies = dependencies;
+		}
+
+		public static ClassLoaderDomain fromClassLoader(NestRepositoryBundleClassLoader cl) {
+			return fromClassLoaderImpl(cl, new HashMap<>());
+		}
+
+		private static ClassLoaderDomain fromClassLoaderImpl(NestRepositoryBundleClassLoader cl,
+				Map<NestRepositoryBundleClassLoader, ClassLoaderDomain> cldomains) {
+			ClassLoaderDomain present = cldomains.get(cl);
+			if (present != null) {
+				return present;
+			}
+			LinkedHashMap<BundleKey, DomainDependency> deps = new LinkedHashMap<>();
+			ClassLoaderDomain result = new ClassLoaderDomain(cl.getBundleKey(), deps);
+			cldomains.put(cl, result);
+
+			for (Entry<BundleKey, DependentClassLoader> entry : cl.getDependencyClassLoaders().entrySet()) {
+				DependentClassLoader depclref = entry.getValue();
+				ClassLoaderDomain depdomain = fromClassLoaderImpl(depclref.classLoader, cldomains);
+				deps.put(entry.getKey(), new DomainDependency(depdomain, depclref.privateScope));
+			}
+
+			return result;
 		}
 
 		public Set<ClassLoaderDomain> getAllDomains() {

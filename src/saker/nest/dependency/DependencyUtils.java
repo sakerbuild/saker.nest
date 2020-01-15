@@ -883,7 +883,6 @@ public class DependencyUtils {
 						return true;
 					}
 				}
-				System.out.println("DependencyUtils.satisfy() " + pinsnapshot);
 				usedomain = DomainResult.newPrivateSubDomain(domain, bundleresolutionstate.bundleEntry);
 				privatescopedomains.put(privscope, Optional.of(usedomain));
 

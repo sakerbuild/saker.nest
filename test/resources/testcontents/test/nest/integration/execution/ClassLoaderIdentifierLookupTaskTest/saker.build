@@ -1,0 +1,5 @@
+build(
+	out a
+) {
+	$a = a.task(test.input())
+}

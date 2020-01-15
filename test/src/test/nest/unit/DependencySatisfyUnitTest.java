@@ -42,7 +42,6 @@ import saker.nest.bundle.BundleInformation;
 import saker.nest.bundle.BundleKey;
 import saker.nest.bundle.SimpleBundleKey;
 import saker.nest.dependency.DependencyDomainResolutionResult;
-import saker.nest.dependency.DependencyResolutionResult;
 import saker.nest.dependency.DependencyUtils;
 import saker.nest.version.ExactVersionRange;
 import saker.nest.version.VersionRange;
@@ -388,7 +387,7 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				.bundle("x-v1").depend("d", "[1, 2]").build()//
 				.assertSatisfiable("b-v1", "x-v1", "d-v2")//
 				.assertSatisfiable("c-v1", "x-v1", "d-v1")//
-				.assertRecurrSatisfiable(false,"a-v1", "b-v1", "c-v1", "x-v1", "d-v2", "d-v1")//
+				.assertRecurrSatisfiable(false, "a-v1", "b-v1", "c-v1", "x-v1", "d-v2", "d-v1")//
 		;
 
 		lookup()//
@@ -571,7 +570,7 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 			assertResults(satisfied, bundleidset, getBaseBundleEntry(BundleIdentifier.valueOf(bundleid)));
 
 			try {
-				DependencyResolutionResult<?, ?> satisfiedold = satisfyOld(bundleid);
+				saker.nest.dependency.DependencyResolutionResult<?, ?> satisfiedold = satisfyOld(bundleid);
 				assertNonNull(satisfiedold, "Failed to satisfy: " + bundleid);
 				assertResultsOld(satisfiedold, bundleidset, getBaseBundleEntry(BundleIdentifier.valueOf(bundleid)));
 			} catch (UnsupportedOperationException e) {
@@ -613,7 +612,7 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 			}
 		}
 
-		private static void assertResultsOld(DependencyResolutionResult<?, ?> satisfied,
+		private static void assertResultsOld(saker.nest.dependency.DependencyResolutionResult<?, ?> satisfied,
 				Set<BundleIdentifier> bundleidset, Entry<? extends BundleIdentifierHolder, ?> basebundleentry) {
 			BundleIdentifier[] domainresultbundleidarray = satisfied.getDependencyDomainResult().keySet().stream()
 					.map(Entry::getKey).map(BundleIdentifierHolder::getBundleIdentifier)
@@ -651,7 +650,7 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 			assertResults(satisfied, bundleidset, getBaseBundleEntry(PSEUDO_BASE_BUNDLE_ID));
 
 			try {
-				DependencyResolutionResult<?, ?> satisfiedold = satisfyMultipleOld(bundleids);
+				saker.nest.dependency.DependencyResolutionResult<?, ?> satisfiedold = satisfyMultipleOld(bundleids);
 				assertNonNull(satisfiedold, "Failed to satisfy: " + Arrays.toString(bundleids));
 				assertResultsOld(satisfiedold, bundleidset, getBaseBundleEntry(PSEUDO_BASE_BUNDLE_ID));
 			} catch (UnsupportedOperationException e) {
@@ -686,7 +685,7 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 			return satisfyres;
 		}
 
-		public DependencyResolutionResult<?, ?> satisfyMultipleOld(String... bundleids) {
+		public saker.nest.dependency.DependencyResolutionResult<?, ?> satisfyMultipleOld(String... bundleids) {
 			System.out.println();
 
 			Map<BundleIdentifier, BundleDependencyList> dependencies = new TreeMap<>();
@@ -698,7 +697,8 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 			}
 			BundleDependencyInformation depinfo = BundleDependencyInformation.create(dependencies);
 
-			DependencyResolutionResult<?, ?> satisfyres = runSatisfyOld(PSEUDO_BASE_BUNDLE_ID, depinfo);
+			saker.nest.dependency.DependencyResolutionResult<?, ?> satisfyres = runSatisfyOld(PSEUDO_BASE_BUNDLE_ID,
+					depinfo);
 			return satisfyres;
 		}
 
@@ -738,11 +738,11 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 			return satisfyres;
 		}
 
-		private DependencyResolutionResult<?, ?> runSatisfyOld(BundleIdentifier basebundle,
+		private saker.nest.dependency.DependencyResolutionResult<?, ?> runSatisfyOld(BundleIdentifier basebundle,
 				BundleDependencyInformation depinfo) {
 			TestDependencyResolutionLogger<Object> logger = new TestDependencyResolutionLogger<>();
 			System.out.println("Start dependency resolution... (old)");
-			DependencyResolutionResult<?, ?> satisfyres = DependencyUtils
+			saker.nest.dependency.DependencyResolutionResult<?, ?> satisfyres = DependencyUtils
 					.satisfyDependencyRequirements(new SimpleBundleKey(basebundle, null), null, depinfo, (bid, bc) -> {
 						Map<String, BundleIdentifier> lookupres = new TreeMap<>(
 								Collections.reverseOrder(BundleIdentifier::compareVersionQualifiers));
@@ -787,12 +787,12 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 			return satisfyres;
 		}
 
-		public DependencyResolutionResult<?, ?> satisfyOld(String bundleid) {
+		public saker.nest.dependency.DependencyResolutionResult<?, ?> satisfyOld(String bundleid) {
 			System.out.println();
 			BundleIdentifier basebundle = BundleIdentifier.valueOf(bundleid);
 
 			BundleDependencyInformation depinfo = createDependencyInformation(basebundle);
-			DependencyResolutionResult<?, ?> satisfyres = runSatisfyOld(basebundle, depinfo);
+			saker.nest.dependency.DependencyResolutionResult<?, ?> satisfyres = runSatisfyOld(basebundle, depinfo);
 			return satisfyres;
 		}
 
