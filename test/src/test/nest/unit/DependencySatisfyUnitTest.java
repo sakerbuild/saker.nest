@@ -17,6 +17,7 @@ package test.nest.unit;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -124,6 +125,7 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 		;
 
 		//circular
+		System.out.println("Circular");
 		lookup()//
 				.bundle("first.bundle-v1").depend("second.bundle", "1.0").build()//
 				.bundle("second.bundle-v1.0").depend("third.bundle", "1.0").build()//
@@ -486,6 +488,14 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 				.bundle("p-v2").build()//
 				.assertSatisfiable("a-v1", "b-v1", "p-v1", "p-v2")//
 		;
+
+		lookup()//
+				.bundle("sjc-api-v1").depend("sjc-impl", "1").build()//
+				.bundle("sjc-impl-v1").depend("sjc-api", "1").build()//
+				.assertSatisfiable("sjc-api-v1", "sjc-impl-v1")//
+				.assertSatisfiable("sjc-impl-v1", "sjc-api-v1")//
+				.assertNonRecurringDomains("sjc-api-v1")//
+		;
 	}
 
 	private static LookupContext lookup() {
@@ -501,6 +511,36 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 			return new BundleDependencyBuilder(BundleIdentifier.valueOf(identifier));
 		}
 
+		public void assertNonRecurringDomains(String bundleid) {
+			DependencyDomainResolutionResult<?, ?> res = satisfy(bundleid);
+			assertNonNull(res, "Failed to satisfy: " + bundleid);
+			printSatisfiedDomain(bundleid, res);
+			HashMap<BundleIdentifier, DependencyDomainResolutionResult<?, ?>> domains = new HashMap<>();
+			domains.put(BundleIdentifier.valueOf(bundleid), res);
+			assertNonRecurringDomainsImpl(res, domains);
+		}
+
+		private void assertNonRecurringDomainsImpl(DependencyDomainResolutionResult<?, ?> domain,
+				Map<BundleIdentifier, DependencyDomainResolutionResult<?, ?>> found) {
+			for (Entry<? extends Entry<? extends BundleIdentifierHolder, ?>, ? extends DependencyDomainResolutionResult<?, ?>> entry : domain
+					.getDirectDependencies().entrySet()) {
+				BundleIdentifier bid = entry.getKey().getKey().getBundleIdentifier();
+				DependencyDomainResolutionResult<?, ?> prev = found.putIfAbsent(bid, entry.getValue());
+				if (prev != null) {
+					if (prev != entry.getValue()) {
+						System.out.println("First: ");
+						printSatisfiedDomain(bid.toString(), prev);
+						System.out.println("Second: ");
+						printSatisfiedDomain(bid.toString(), entry.getValue());
+						throw new AssertionError("Duplicate domains for: " + bid);
+					}
+				} else {
+					assertNonRecurringDomainsImpl(entry.getValue(), found);
+				}
+			}
+
+		}
+
 		public LookupContext assertNotSatisfiable(String bundleid) {
 			DependencyDomainResolutionResult<?, ?> res = satisfy(bundleid);
 			if (res != null) {
@@ -513,7 +553,7 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 		public LookupContext assertSatisfiable(String bundleid, String... expectedbundles) {
 			DependencyDomainResolutionResult<?, ?> satisfied = satisfy(bundleid);
 			assertNonNull(satisfied, "Failed to satisfy: " + bundleid);
-			printSatisfiedDomain(satisfied);
+			printSatisfiedDomain(bundleid, satisfied);
 			Set<BundleIdentifier> bundleidset = bundleIdSetOf(bundleid, expectedbundles);
 
 			assertResults(satisfied, bundleidset, getBaseBundleEntry(BundleIdentifier.valueOf(bundleid)));
@@ -589,7 +629,7 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 		public LookupContext assertMultiSatisfiable(String[] bundleids, String[] expectedbundles) {
 			DependencyDomainResolutionResult<?, ?> satisfied = satisfyMultiple(bundleids);
 			assertNonNull(satisfied, "Failed to satisfy: " + Arrays.toString(bundleids));
-			printSatisfiedDomain(satisfied);
+			printSatisfiedDomain(null, satisfied);
 			Set<BundleIdentifier> bundleidset = bundleIdSetOf(PSEUDO_BASE_BUNDLE_ID.toString(), expectedbundles);
 
 			assertResults(satisfied, bundleidset, getBaseBundleEntry(PSEUDO_BASE_BUNDLE_ID));
@@ -809,9 +849,13 @@ public class DependencySatisfyUnitTest extends SakerTestCase {
 
 		}
 
-		private static void printSatisfiedDomain(DependencyDomainResolutionResult<?, ?> satisfied) {
+		private static void printSatisfiedDomain(String startbundle, DependencyDomainResolutionResult<?, ?> satisfied) {
 			String str = satisfied.toString();
 			StringBuilder sb = new StringBuilder();
+			if (startbundle != null) {
+				sb.append(startbundle);
+				sb.append(": ");
+			}
 			int len = str.length();
 			String tab = "";
 			for (int i = 0; i < len; i++) {

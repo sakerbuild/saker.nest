@@ -515,6 +515,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			classLoaders.clear();
 			domainClassLoaders.clear();
 		}
+		taskClasses.clear();
 	}
 
 	public Object detectChanges(ExecutionPathConfiguration pathconfig) {
@@ -572,10 +573,13 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 	@Override
 	@SuppressWarnings("unchecked")
 	public TaskFactory<?> lookupTask(TaskName taskname) throws TaskNotFoundException {
+		if (closed) {
+			throw new IllegalStateException("closed.");
+		}
 		if (!BundleIdentifier.hasVersionQualifier(taskname.getTaskQualifiers())) {
 			taskname = pinnedTaskVersion.getOrDefault(taskname, taskname);
 		}
-		return taskClasses.computeIfAbsent(taskname, tn -> {
+		TaskFactory<?> result = taskClasses.computeIfAbsent(taskname, tn -> {
 			Class<?> taskclass;
 			try {
 				taskclass = this.getTaskClass(tn);
@@ -624,6 +628,12 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 				}
 			};
 		}).get();
+		if (closed) {
+			//remove if it was added meanwhile between closing
+			taskClasses.remove(taskname);
+			throw new IllegalStateException("closed.");
+		}
+		return result;
 	}
 
 	public static String getSubDirectoryNameForServerStorage(String serverhost) {
@@ -856,12 +866,18 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 	}
 
 	private static class ClassLoaderDependencyResolutionBundleContext {
-		private BundleStorageView storageView;
-		private BundleLookup relativeLookup;
+		private final BundleStorageView storageView;
+		private final BundleLookup relativeLookup;
 
 		public ClassLoaderDependencyResolutionBundleContext(BundleVersionLookupResult lookupresult) {
 			this.storageView = lookupresult.getStorageView();
 			this.relativeLookup = lookupresult.getRelativeLookup();
+		}
+
+		public ClassLoaderDependencyResolutionBundleContext(BundleStorageView storageView,
+				BundleLookup relativeLookup) {
+			this.storageView = storageView;
+			this.relativeLookup = relativeLookup;
 		}
 
 		public BundleStorageView getStorageView() {
@@ -941,8 +957,6 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 					+ constraints.getNativeArchitecture() + " for architectures: "
 					+ StringUtils.toStringJoin(", ", bundleinfo.getSupportedClassPathArchitectures()));
 		}
-		BundleVersionLookupResult baseversionlookupinfo = new SimpleBundleVersionLookupResult(
-				Collections.singleton(bundleid), bundlestorage, bundlelookupconfig);
 		BundleDependencyInformation basefiltereddepinfo = filterDependencyInformationForClassPath(
 				bundleinfo.getDependencyInformation(), CLASSPATH_DEPENDENCY_KIND_SINGLETON);
 		DependencyResolutionLogger<ClassLoaderDependencyResolutionBundleContext> logger = null;
@@ -975,8 +989,8 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 
 		DependencyDomainResolutionResult<BundleKey, ClassLoaderDependencyResolutionBundleContext> domainsatisfied = DependencyUtils
 				.satisfyDependencyDomain(bundlekey,
-						new ClassLoaderDependencyResolutionBundleContext(baseversionlookupinfo), basefiltereddepinfo,
-						bundleslookupfunction, bundledependencieslookupfunction, logger);
+						new ClassLoaderDependencyResolutionBundleContext(bundlestorage, bundlelookupconfig),
+						basefiltereddepinfo, bundleslookupfunction, bundledependencieslookupfunction, logger);
 		if (domainsatisfied == null) {
 			//XXX handle dependency satisfaction failure better
 			BundleDependencyUnsatisfiedException unsatisfiedexc = new BundleDependencyUnsatisfiedException(

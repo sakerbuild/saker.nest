@@ -394,6 +394,7 @@ public class DependencyUtils {
 		public DependencyDomainResolutionResultImpl(DomainResult<BK, BC> basedomain,
 				Map<BK, Supplier<BundleDependencyInformation>> dependencieslookupcache,
 				Map<DomainResult<BK, BC>, DependencyDomainResolutionResultImpl<BK, BC>> created) {
+			created.put(basedomain, this);
 			LinkedHashMap<Entry<? extends BK, ? extends BC>, DependencyDomainResolutionResultImpl<BK, BC>> directdependencies = createDirectDependencies(
 					basedomain, dependencieslookupcache, created);
 			this.directDependencies = ImmutableUtils.unmodifiableMap(directdependencies);

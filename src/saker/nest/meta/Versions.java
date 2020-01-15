@@ -85,6 +85,8 @@ public class Versions {
 	 * 
 	 * Note that you shouldn't start your version numbers with the number <code>0</code>, as that represents an octal
 	 * number.
+	 * 
+	 * @since saker.nest 0.8.1
 	 */
 	@PublicApi(unconstantize = DefaultableBoolean.TRUE)
 	public static final int VERSION_FULL_COMPOUND = VERSION_MAJOR * 1_000_000 + VERSION_MINOR * 1_000 + VERSION_PATCH;

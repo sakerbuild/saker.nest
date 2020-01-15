@@ -156,7 +156,10 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 	 */
 	private Class<?> loadDefineClassFromBundle(String name) throws ClassNotFoundException {
 		Class<?> result = super.findClass(name);
-		bundleLoadedClasses.put(name, result);
+		Class<?> prev = bundleLoadedClasses.putIfAbsent(name, result);
+		if (prev != null) {
+			throw new AssertionError("Loaded class multiple times: " + name);
+		}
 		return result;
 	}
 
@@ -227,7 +230,6 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 	}
 
 	private Class<?> loadClassRecursively(Set<NestBundleClassLoader> triedcls, String name, ClassNotFoundException e) {
-		// First, check if the class has already been loaded
 		synchronized (getClassLoadingLock(name)) {
 			Class<?> c = getAlreadyLoadedClassByThisBundle(name);
 			if (c != null) {
@@ -237,12 +239,8 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 				return Class.forName(name, false, getParent());
 			} catch (ClassNotFoundException e2) {
 				e.addSuppressed(e2);
-				// ClassNotFoundException thrown if class not found
-				// from the non-null parent class loader
 			}
 
-			// If still not found, then invoke findClass in order
-			// to find the class.
 			try {
 				return loadDefineClassFromBundle(name);
 			} catch (ClassNotFoundException e2) {
