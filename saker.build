@@ -1,5 +1,5 @@
 # UPDATE saker.nest.meta.Versions when updating this value
-global(saker.nest.VERSION) = "0.8.0"
+global(saker.nest.VERSION) = "0.8.1"
 global(VERSION_saker.apiextract) = "0.8.0"
 global(VERSION_sipka.cmdline) = "0.8.0"
 
@@ -151,8 +151,8 @@ exportall(
 		$apiexport[jar][Path],
 		$testexport[export][Path],
 		$testexport[testutiljar][Path],
-		$testexport[instrumentedsakerjar][Path],
 		$sourcejar[Path],
+		$testexport[testinstrumentationjar][Path],
 	]
 ){
 	$export = include(export)
@@ -167,7 +167,7 @@ exportall(
 					action/,
 					json/,
 					test/api/,
-					test/disabled/,
+					test/enabled/,
 					test/util/,
 					$export[compile][action][SourceGenDirectory],
 				],
@@ -208,7 +208,7 @@ testexport(
 	out compile,
 	out testutiljar,
 	out testutiljavac,
-	out instrumentedsakerjar,
+	out testinstrumentationjar,
 ) {
 	$testutiljavac = saker.java.compile(
 		SourceDirectories: test/util/,
@@ -242,24 +242,18 @@ testexport(
 			},
 		},
 	)
-	$instrumentedsakerjar = saker.jar.create(
-		Output: saker.nest-test-saker.build.jar,
+	$testinstrumentationjar = saker.jar.create(
+		Output: saker.nest-test-instrumentation.jar,
 		Resources: [
 			{
 				Directory: $compile[testapicompile][ClassDirectory],
 				Resources: **,
 			},
 		],
-		Includes: [
-			{
-				Archive: nest.bundle.download("saker.build-test-v{ static(VERSION_saker.build) }")[BundlePaths][0],
-				Resources: **,
-			},
-		],
 		Manifest: {
 			MainAttributes: {
 				Nest-Bundle-Format-Version: 1,
-				Nest-Bundle-Identifier: "saker.nest-test-saker.build-v{ global(saker.nest.VERSION) }",
+				Nest-Bundle-Identifier: "saker.nest-test-instrumentation-v{ global(saker.nest.VERSION) }",
 				Nest-Bundle-Source: "saker.nest-sources-v{ global(saker.nest.VERSION) }",
 			},
 		},
@@ -269,6 +263,19 @@ test() {
 	$testexport = include(testexport)
 	$export = $testexport[export]
 	$compile = $export[compile]
+	
+	$instrumentedsakerjarpath = saker.jar.create(
+		Output: saker.build-nest_instrumented.jar,
+		Resources: [
+			{
+				Directory: $compile[testapicompile][ClassDirectory],
+				Resources: **,
+			},
+		],
+		Includes: [
+			nest.bundle.download("saker.build-test-v{ static(VERSION_saker.build) }")[BundlePaths][0]
+		],
+	)[Path]
 	
 	$testcompile = saker.java.compile(
 		SourceDirectories: test/src,
@@ -284,7 +291,7 @@ test() {
 			saker.java.classpath.bundle("saker.build-test-runner-v{ static(VERSION_saker.build) }"),
 		],
 		ClassPath: [
-			$testexport[instrumentedsakerjar][Path],
+			$instrumentedsakerjarpath,
 			$compile[main][ClassDirectory],
 			$compile[testapicompile][ClassDirectory],
 		],
@@ -312,7 +319,7 @@ test() {
 			saker.java.classpath.bundle("saker.build-test-runner-v{ static(VERSION_saker.build) }"),
 		],
 		ClassPath: [
-			$testexport[instrumentedsakerjar][Path],
+			$instrumentedsakerjarpath,
 			$compile[testapicompile][ClassDirectory],
 		],
 		TestInvokerClass: testing.saker.SakerJavaTestingInvoker,

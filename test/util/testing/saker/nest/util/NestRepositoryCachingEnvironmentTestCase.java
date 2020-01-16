@@ -32,7 +32,6 @@ import saker.build.file.provider.SakerPathFiles;
 import saker.build.runtime.params.ExecutionPathConfiguration;
 import testing.saker.build.tests.EnvironmentTestCase;
 import testing.saker.nest.NestMetric;
-import testing.saker.nest.util.RepositoryLoadingVariablesMetricEnvironmentTestCase;
 
 public abstract class NestRepositoryCachingEnvironmentTestCase
 		extends RepositoryLoadingVariablesMetricEnvironmentTestCase {

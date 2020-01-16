@@ -18,7 +18,6 @@ package testing.saker.nest;
 import java.lang.ref.WeakReference;
 
 import saker.build.thirdparty.saker.util.ObjectUtils;
-import testing.saker.nest.NestMetric;
 
 public class TestFlag {
 	private static final NestMetric NULL_METRIC_INSTANCE = new NestMetric() {

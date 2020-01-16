@@ -40,7 +40,6 @@ import testing.saker.SakerTest;
 import testing.saker.build.tests.CollectingMetricEnvironmentTestCase;
 import testing.saker.build.tests.EnvironmentTestCaseConfiguration;
 import testing.saker.build.tests.TestUtils;
-import testing.saker.nest.NestMetric;
 import testing.saker.nest.TestFlag;
 import testing.saker.nest.util.NestIntegrationTestUtils;
 

@@ -56,7 +56,7 @@ public class Versions {
 	 * @see <a href="https://semver.org/">https://semver.org/</a>
 	 */
 	@PublicApi(unconstantize = DefaultableBoolean.TRUE)
-	public static final int VERSION_PATCH = 0;
+	public static final int VERSION_PATCH = 1;
 
 	/**
 	 * The full version string in the format of
@@ -76,9 +76,9 @@ public class Versions {
 	 * It can be easily used in conditional statements to query the runtime for available features.
 	 * 
 	 * <pre>
-	 * if (Versions.VERSION_FULL_COMPOUND >= 8_001) {
+	 * if (Versions.VERSION_FULL_COMPOUND &gt;= 8_001) {
 	 * 	// use features from 0.8.1
-	 * } else if (Versions.VERSION_FULL_COMPOUND >= 1_000_000) {
+	 * } else if (Versions.VERSION_FULL_COMPOUND &gt;= 1_000_000) {
 	 * 	// use features from 1.0.0
 	 * }
 	 * </pre>
