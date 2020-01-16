@@ -97,6 +97,7 @@ import saker.nest.dependency.DependencyUtils;
 import saker.nest.exc.BundleDependencyUnsatisfiedException;
 import saker.nest.exc.BundleLoadingFailedException;
 import saker.nest.meta.Versions;
+import saker.nest.thirdparty.org.json.JSONArray;
 import saker.nest.thirdparty.org.json.JSONObject;
 import saker.nest.utils.IdentityComparisonPair;
 import saker.nest.utils.NonSpaceIterator;
@@ -411,6 +412,9 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 	}
 
 	private BundleKey reconstructionIdentifierToBundleKey(String reconstid) {
+		if (reconstid == null) {
+			return null;
+		}
 		int idx = reconstid.indexOf('|');
 		if (idx < 0) {
 			return null;
@@ -429,27 +433,34 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 
 	private String domainToReconstructionString(ClassLoaderDomain domain) {
 		JSONObject obj = new JSONObject();
-		obj.put("@root", bundleKeyToReconstructionIdentifier(domain.bundle));
+		obj.put("@bk", bundleKeyToReconstructionIdentifier(domain.bundle));
 		domainToReconstructionJSONImpl(domain, obj, new HashMap<>());
 		return obj.toString();
 	}
 
 	private void domainToReconstructionJSONImpl(ClassLoaderDomain domain, JSONObject obj,
 			Map<ClassLoaderDomain, Integer> backreferences) {
-		int backrefnum = backreferences.size();
-		Integer prevbackref = backreferences.putIfAbsent(domain, backrefnum);
+		Integer prevbackref = backreferences.get(domain);
 		if (prevbackref != null) {
 			obj.put("@r", prevbackref.intValue());
 			return;
 		}
+		int backrefnum = backreferences.size();
+		backreferences.put(domain, backrefnum);
 		obj.put("@i", backrefnum);
-		for (Entry<BundleKey, ClassLoaderDomain.DomainDependency> entry : domain.dependencies.entrySet()) {
-			JSONObject depobj = new JSONObject();
-			if (entry.getValue().privateScope) {
-				depobj.put("@p", 1);
+		if (!domain.dependencies.isEmpty()) {
+			JSONArray depsarray = new JSONArray();
+			for (Entry<BundleKey, ClassLoaderDomain.DomainDependency> entry : domain.dependencies.entrySet()) {
+				JSONObject depobj = new JSONObject();
+				if (entry.getValue().privateScope) {
+					depobj.put("@p", 1);
+				}
+				String bkreconstructid = bundleKeyToReconstructionIdentifier(entry.getKey());
+				depobj.put("@bk", bkreconstructid);
+				depsarray.put(depobj);
+				domainToReconstructionJSONImpl(entry.getValue().domain, depobj, backreferences);
 			}
-			obj.put(bundleKeyToReconstructionIdentifier(entry.getKey()), depobj);
-			domainToReconstructionJSONImpl(entry.getValue().domain, depobj, backreferences);
+			obj.put("@d", depsarray);
 		}
 	}
 
@@ -457,7 +468,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 		JSONObject json;
 		try {
 			json = new JSONObject(str);
-			String rootbkreconstructionid = json.getString("@root");
+			String rootbkreconstructionid = json.getString("@bk");
 			BundleKey rootbk = reconstructionIdentifierToBundleKey(rootbkreconstructionid);
 			if (rootbk == null) {
 				return null;
@@ -480,26 +491,22 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 		ClassLoaderDomain result = new ClassLoaderDomain(bundlekey, deps);
 		refs.put(objid, result);
 
-		Iterator<String> keyit = obj.keys();
-		while (keyit.hasNext()) {
-			String k = keyit.next();
-			if (k.isEmpty()) {
-				return null;
+		JSONArray depsarray = obj.optJSONArray("@d");
+		if (depsarray != null) {
+			Iterator<Object> dit = depsarray.iterator();
+			while (dit.hasNext()) {
+				JSONObject depobj = (JSONObject) dit.next();
+				BundleKey depbundlekey = reconstructionIdentifierToBundleKey(depobj.optString("@bk", null));
+				if (depbundlekey == null) {
+					return null;
+				}
+				ClassLoaderDomain depcldomain = domainFromReconstructionJSON(depobj, depbundlekey, refs);
+				if (depcldomain == null) {
+					return null;
+				}
+				boolean privatescope = depobj.optInt("@p", -1) == 1;
+				deps.put(depbundlekey, new ClassLoaderDomain.DomainDependency(depcldomain, privatescope));
 			}
-			if (k.charAt(0) == '@') {
-				//control field
-				continue;
-			}
-			BundleKey depbundlekey = reconstructionIdentifierToBundleKey(k);
-			if (depbundlekey == null) {
-				return null;
-			}
-			JSONObject depobj = obj.getJSONObject(k);
-			ClassLoaderDomain depcldomain = domainFromReconstructionJSON(depobj, depbundlekey, refs);
-			if (depcldomain == null) {
-				return null;
-			}
-			deps.put(depbundlekey, new ClassLoaderDomain.DomainDependency(depcldomain, depobj.optInt("@p", -1) == 1));
 		}
 		return result;
 	}
