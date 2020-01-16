@@ -542,6 +542,12 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		if (uncacheparam != null) {
 			return Boolean.parseBoolean(uncacheparam);
 		}
+		if (TestFlag.ENABLED) {
+			Boolean override = TestFlag.metric().overrideServerUncacheRequestsValue();
+			if (override != null) {
+				return override;
+			}
+		}
 		String cival = System.getenv("CI");
 		if (cival != null) {
 			return Boolean.parseBoolean(cival);

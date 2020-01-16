@@ -66,4 +66,8 @@ public interface NestMetric {
 			ExecutionPathConfiguration pathconfig, Map<String, String> userparameters) {
 		return null;
 	}
+
+	public default Boolean overrideServerUncacheRequestsValue() {
+		return false;
+	}
 }
