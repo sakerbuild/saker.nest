@@ -249,6 +249,10 @@ testexport(
 				Directory: $compile[testapicompile][ClassDirectory],
 				Resources: **,
 			},
+			{
+				Files: LICENSE,
+				TargetDirectory: META-INF,
+			},
 		],
 		Manifest: {
 			MainAttributes: {
