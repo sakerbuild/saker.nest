@@ -127,8 +127,9 @@ public class KnownBundlesDependencyResolutionTest extends ManualLoadedRepository
 								continue;
 							}
 							//ignore some bundles that are special
-							if ((bid.getName().equals("saker.build") && entry.startsWith("internal/"))
-									|| (bid.getName().equals("saker.nest") && entry.startsWith("internal/"))
+							//don't test saker.build and saker.nest, as they are already on the classpath and may
+							//case IllegalAccessErrors
+							if ((bid.getName().equals("saker.build")) || (bid.getName().equals("saker.nest"))
 									|| bundlename.equals(BundleIdentifier.valueOf("saker.nest-test"))
 									|| bundlename.equals(BundleIdentifier.valueOf("saker.nest-test-utils"))
 									|| bundlename.equals(BundleIdentifier.valueOf("saker.maven.support-lib"))

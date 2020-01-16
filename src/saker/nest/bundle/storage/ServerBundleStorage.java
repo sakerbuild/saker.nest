@@ -531,9 +531,26 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 	@Override
 	public AbstractBundleStorageView newStorageView(Map<String, String> userparameters,
 			ExecutionPathConfiguration pathconfig) {
-		return new ServerBundleStorageViewImpl(
-				Boolean.parseBoolean(userparameters.get(ServerBundleStorageView.PARAMETER_OFFLINE)),
-				createSignatureVerificationConfiguration(userparameters));
+		boolean uncacherequests = getUncacheRequestsValue(userparameters);
+		boolean offline = Boolean.parseBoolean(userparameters.get(ServerBundleStorageView.PARAMETER_OFFLINE));
+		return new ServerBundleStorageViewImpl(offline, createSignatureVerificationConfiguration(userparameters),
+				uncacherequests);
+	}
+
+	private static boolean getUncacheRequestsValue(Map<String, String> userparameters) {
+		String uncacheparam = userparameters.get(ServerBundleStorageView.PARAMETER_REQUESTS_UNCACHE);
+		if (uncacheparam != null) {
+			return Boolean.parseBoolean(uncacheparam);
+		}
+		String cival = System.getenv("CI");
+		if (cival != null) {
+			return Boolean.parseBoolean(cival);
+		}
+		String tfbuildval = System.getenv("TF_BUILD");
+		if (tfbuildval != null) {
+			return Boolean.parseBoolean(tfbuildval);
+		}
+		return false;
 	}
 
 	@Override
@@ -569,11 +586,6 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 			return String.format(Locale.US, "%.1f KiB/sec", bytespersec / 1024d);
 		}
 		return String.format(Locale.US, "%.1f MiB/sec", bytespersec / (1024d * 1024d));
-	}
-
-	protected NavigableSet<BundleIdentifier> getBundlesForTaskName(TaskName taskname, boolean offline)
-			throws IOException {
-		return getBundlesForTaskName(taskname, offline ? IndexManager.FLAG_OFFLINE : 0);
 	}
 
 	protected NavigableSet<BundleIdentifier> getBundlesForTaskName(TaskName taskname, int indexflags)
@@ -1091,6 +1103,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 	private static abstract class IndexManager<T> {
 		public static final int FLAG_OFFLINE = 1 << 0;
 		public static final int FLAG_MISSING_INDEX_ACCEPTABLE = 1 << 1;
+		public static final int FLAG_MISSING_REQUESTS_UNCACHE = 1 << 2;
 
 		private static final String INDEX_TYPE_LOOKUP = "lookup";
 		private static final String INDEX_TYPE_INDEX = "index";
@@ -1517,7 +1530,11 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		private static JSONObject makeJsonIndexRequest(IndexOperationOptions options, String additionalurl,
 				String rooturl) throws IOException {
 			boolean offline = (options.flags & FLAG_OFFLINE) == FLAG_OFFLINE;
-			return makeServerRequest(offline, rooturl + additionalurl, (rc, ins, errs, headerfunc) -> {
+			String url = rooturl + additionalurl;
+			if (((options.flags & FLAG_MISSING_REQUESTS_UNCACHE) == FLAG_MISSING_REQUESTS_UNCACHE)) {
+				url += "?uncache-" + UUID.randomUUID();
+			}
+			return makeServerRequest(offline, url, (rc, ins, errs, headerfunc) -> {
 				if (rc == HttpURLConnection.HTTP_OK) {
 					try (InputStream is = ins.get();
 							InputStreamReader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
@@ -1744,17 +1761,19 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 
 		private final boolean offline;
 		private final BundleSignatureVerificationConfiguration signatureVerificationConfiguration;
+		private final int uncacheRequestsIndexFlag;
 
 		private ConcurrentSkipListSet<String> bundleInformationProviderAsyncDownloadedIndexes = new ConcurrentSkipListSet<>();
 		private ConcurrentSkipListSet<String> taskInformationProviderAsyncDownloadedIndexes = new ConcurrentSkipListSet<>();
 		private ConcurrentSkipListSet<BundleIdentifier> informationProviderAsyncDownloadedBundles = new ConcurrentSkipListSet<>();
 
 		public ServerBundleStorageViewImpl(boolean offline,
-				BundleSignatureVerificationConfiguration signatureVerificationConfiguration) {
+				BundleSignatureVerificationConfiguration signatureVerificationConfiguration, boolean uncacherequests) {
 			this.signatureVerificationConfiguration = signatureVerificationConfiguration;
 			this.storageViewKey = new ServerStorageViewKeyImpl(ServerBundleStorage.this.getStorageKey(), offline,
 					signatureVerificationConfiguration);
 			this.offline = offline;
+			this.uncacheRequestsIndexFlag = uncacherequests ? IndexManager.FLAG_MISSING_REQUESTS_UNCACHE : 0;
 		}
 
 		@Override
@@ -1798,7 +1817,8 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 
 		@Override
 		public NestRepositoryBundle lookupTaskBundle(TaskName taskname) throws TaskNotFoundException, IOException {
-			NavigableSet<BundleIdentifier> bundlesfortask = getBundlesForTaskName(taskname, offline);
+			NavigableSet<BundleIdentifier> bundlesfortask = getBundlesForTaskName(taskname,
+					this.uncacheRequestsIndexFlag | (offline ? IndexManager.FLAG_OFFLINE : 0));
 			BundleIdentifier chosenbundle = BundleUtils.selectAppropriateBundleIdentifierForTask(taskname,
 					bundlesfortask);
 			if (chosenbundle == null) {
@@ -1817,7 +1837,9 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 			String packagename = bundleid.getName();
 			try {
 				NavigableMap<String, NavigableSet<BundleIdentifier>> packages = packageBundlesIndexManager
-						.getIndexForName(new IndexOperationOptions(offline ? IndexManager.FLAG_OFFLINE : 0),
+						.getIndexForName(
+								new IndexOperationOptions(
+										this.uncacheRequestsIndexFlag | (offline ? IndexManager.FLAG_OFFLINE : 0)),
 								packagename);
 				NavigableSet<BundleIdentifier> bundles = ObjectUtils.getMapValue(packages, packagename);
 				if (ObjectUtils.isNullOrEmpty(bundles)) {
@@ -1851,7 +1873,9 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 
 			try {
 				NavigableMap<String, NavigableSet<BundleIdentifier>> packages = packageBundlesIndexManager
-						.getIndexForName(new IndexOperationOptions(offline ? IndexManager.FLAG_OFFLINE : 0),
+						.getIndexForName(
+								new IndexOperationOptions(
+										this.uncacheRequestsIndexFlag | (offline ? IndexManager.FLAG_OFFLINE : 0)),
 								bundlename);
 				NavigableSet<BundleIdentifier> bundles = ObjectUtils.getMapValue(packages, bundlename);
 				if (ObjectUtils.isNullOrEmpty(bundles)) {
@@ -1952,7 +1976,8 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 			NavigableSet<TaskName> result = new TreeSet<>();
 			try {
 				IndexOperationOptions opoptions = new AsyncDownloadStartingIndexOperationOptions(
-						IndexManager.FLAG_MISSING_INDEX_ACCEPTABLE | IndexManager.FLAG_OFFLINE,
+						this.uncacheRequestsIndexFlag | IndexManager.FLAG_MISSING_INDEX_ACCEPTABLE
+								| IndexManager.FLAG_OFFLINE,
 						this::startTaskIndexAsyncDownload);
 				NavigableMap<String, NavigableSet<BundleIdentifier>> taskbundles = tasksIndexManager
 						.getIndexForName(opoptions, "");
@@ -1985,7 +2010,8 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 			NavigableSet<BundleIdentifier> result = new TreeSet<>();
 			try {
 				IndexOperationOptions opoptions = new AsyncDownloadStartingIndexOperationOptions(
-						IndexManager.FLAG_MISSING_INDEX_ACCEPTABLE | IndexManager.FLAG_OFFLINE,
+						this.uncacheRequestsIndexFlag | IndexManager.FLAG_MISSING_INDEX_ACCEPTABLE
+								| IndexManager.FLAG_OFFLINE,
 						this::startBundleIndexAsyncDownload);
 				NavigableMap<String, NavigableSet<BundleIdentifier>> bundlepackages = packageBundlesIndexManager
 						.getIndexForName(opoptions, "");
@@ -2006,7 +2032,8 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		public NestRepositoryBundle lookupTaskBundleForInformationProvider(TaskName taskname) {
 			try {
 				IndexOperationOptions opoptions = new AsyncDownloadStartingIndexOperationOptions(
-						IndexManager.FLAG_MISSING_INDEX_ACCEPTABLE | IndexManager.FLAG_OFFLINE,
+						this.uncacheRequestsIndexFlag | IndexManager.FLAG_MISSING_INDEX_ACCEPTABLE
+								| IndexManager.FLAG_OFFLINE,
 						this::startTaskIndexAsyncDownload);
 				NavigableSet<BundleIdentifier> bundlesfortask = getBundlesForTaskName(taskname, opoptions);
 				BundleIdentifier chosenbundle = BundleUtils.selectAppropriateBundleIdentifierForTask(taskname,

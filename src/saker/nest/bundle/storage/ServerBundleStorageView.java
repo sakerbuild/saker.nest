@@ -113,6 +113,42 @@ public interface ServerBundleStorageView extends BundleStorageView {
 	 */
 	public static final String PARAMETER_OFFLINE = "offline";
 	/**
+	 * Specifies if an attempt should be made to avoid using network caches when making requests.
+	 * <p>
+	 * The parameter must be prefixed by the repository identifier and storage name in the following format:
+	 * 
+	 * <pre>
+	 * &lt;{@link RepositoryBuildEnvironment#getIdentifier() repo-id}&gt;.&lt;{@link NestBundleStorageConfiguration#PARAMETER_NEST_REPOSITORY_STORAGE_CONFIGURATION storage-name}&gt;.&lt;param&gt;
+	 * </pre>
+	 * 
+	 * Various agents in the web can cache the results of requests from a given server. In some cases when using cached
+	 * information from the server can cause build failures, as the build may expect the up-to-date information to
+	 * properly finish.
+	 * <p>
+	 * These cases can happen if a package is just published, and the developer wants to use the latest version.
+	 * However, the content delivery network will not yet serve the latest index files to the developer, as the cached
+	 * copies hasn't expired yet. In these cases, the developer would need to wait out the cache expiration in order to
+	 * be able to build their projects.
+	 * <p>
+	 * Specifying <code>true</code> to the value of this parameter will make the underlying storage issue requests to
+	 * the servers that attempt to avoid retrieving the cached copies, and use the up-to-date indexes instead.
+	 * <p>
+	 * This parameter is mostly useful when running build on a CI, as in other environments the developer could manually
+	 * force the index update if necessary.
+	 * <p>
+	 * In general, developers shouldn't use this parameter.
+	 * <p>
+	 * The default value of the parameter is based on the environment variables of the process. If there's an
+	 * environment variable with <code>CI=true</code>, or <code>TF_BUILD=true</code> (values case insensitive), then the
+	 * value of this parameter is <code>true</code>. Otherwise <code>false</code>.
+	 * <p>
+	 * (The environment variables are determined by known CI providers. While <code>CI</code> is supported by many,
+	 * <code>TF_BUILD</code> is for <a href=
+	 * "https://docs.microsoft.com/en-us/azure/devops/pipelines/build/variables?view=azure-devops&tabs=yaml">Azure
+	 * Pipelines</a>.)
+	 */
+	public static final String PARAMETER_REQUESTS_UNCACHE = "requests.uncache";
+	/**
 	 * Specifies if the bundle signature verification should be disabled by the storage.
 	 * <p>
 	 * The parameter must be prefixed by the repository identifier and storage name in the following format:
