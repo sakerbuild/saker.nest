@@ -21,10 +21,10 @@ import java.util.NavigableSet;
 import saker.build.runtime.repository.TaskNotFoundException;
 import saker.build.task.TaskName;
 import saker.nest.bundle.BundleIdentifier;
+import saker.nest.bundle.storage.AbstractServerBundleStorageView;
 import saker.nest.bundle.storage.BundleStorageView;
 import saker.nest.bundle.storage.LocalBundleStorageView;
 import saker.nest.bundle.storage.ParameterBundleStorageView;
-import saker.nest.bundle.storage.ServerBundleStorageView;
 import saker.nest.bundle.storage.StorageViewKey;
 import saker.nest.exc.BundleLoadingFailedException;
 
@@ -51,7 +51,7 @@ public abstract class AbstractBundleLookup implements BundleLookup {
 
 	public abstract Map<String, ? extends ParameterBundleStorageView> getParameterStorages();
 
-	public abstract Map<String, ? extends ServerBundleStorageView> getServerStorages();
+	public abstract Map<String, ? extends AbstractServerBundleStorageView> getServerStorages();
 
 	public abstract Map<String, ? extends BundleStorageView> getStorages();
 
@@ -62,7 +62,7 @@ public abstract class AbstractBundleLookup implements BundleLookup {
 	public abstract TaskLookupInfo lookupTaskBundleForInformationProvider(TaskName tn);
 
 	public abstract BundleLookup findStorageViewBundleLookup(StorageViewKey storageviewkey);
-	
+
 	protected abstract void appendStorageConfiguration(StringBuilder sb);
 
 	protected abstract void appendConfigurationUserParameters(Map<String, String> userparameters, String repositoryid);
@@ -71,7 +71,7 @@ public abstract class AbstractBundleLookup implements BundleLookup {
 
 	protected abstract void collectParameterStorages(Map<String, ? super ParameterBundleStorageView> result);
 
-	protected abstract void collectServerStorages(Map<String, ? super ServerBundleStorageView> result);
+	protected abstract void collectServerStorages(Map<String, ? super AbstractServerBundleStorageView> result);
 
 	protected abstract void collectStorages(Map<String, ? super BundleStorageView> result);
 

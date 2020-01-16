@@ -13,12 +13,13 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-package saker.nest.action.main;
+package saker.nest.bundle.storage;
 
-import sipka.cmdline.api.SubCommand;
+import java.io.IOException;
 
-@SubCommand(name = "upload", type = ServerUploadBundleCommand.class)
-@SubCommand(name = "index", type = ServerIndexCommand.class)
-public class ServerCommand {
+public abstract class AbstractServerBundleStorageView extends AbstractBundleStorageView
+		implements ServerBundleStorageView {
+	public abstract void updateTaskIndexFiles() throws IOException;
 
+	public abstract void updateBundleIndexFiles() throws IOException;
 }

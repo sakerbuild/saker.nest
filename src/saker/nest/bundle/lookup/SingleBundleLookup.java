@@ -33,10 +33,10 @@ import saker.nest.bundle.BundleIdentifier;
 import saker.nest.bundle.BundleInformation;
 import saker.nest.bundle.NestRepositoryBundle;
 import saker.nest.bundle.storage.AbstractBundleStorageView;
+import saker.nest.bundle.storage.AbstractServerBundleStorageView;
 import saker.nest.bundle.storage.BundleStorageView;
 import saker.nest.bundle.storage.LocalBundleStorageView;
 import saker.nest.bundle.storage.ParameterBundleStorageView;
-import saker.nest.bundle.storage.ServerBundleStorageView;
 import saker.nest.bundle.storage.StorageViewKey;
 import saker.nest.exc.BundleLoadingFailedException;
 
@@ -214,17 +214,17 @@ public class SingleBundleLookup extends AbstractBundleLookup {
 	}
 
 	@Override
-	public Map<String, ? extends ServerBundleStorageView> getServerStorages() {
-		if (storageView instanceof ServerBundleStorageView) {
-			return ImmutableUtils.singletonMap(storageConfigurationName, (ServerBundleStorageView) storageView);
+	public Map<String, ? extends AbstractServerBundleStorageView> getServerStorages() {
+		if (storageView instanceof AbstractServerBundleStorageView) {
+			return ImmutableUtils.singletonMap(storageConfigurationName, (AbstractServerBundleStorageView) storageView);
 		}
 		return Collections.emptyMap();
 	}
 
 	@Override
-	protected void collectServerStorages(Map<String, ? super ServerBundleStorageView> result) {
-		if (storageView instanceof ServerBundleStorageView) {
-			result.put(storageConfigurationName, (ServerBundleStorageView) storageView);
+	protected void collectServerStorages(Map<String, ? super AbstractServerBundleStorageView> result) {
+		if (storageView instanceof AbstractServerBundleStorageView) {
+			result.put(storageConfigurationName, (AbstractServerBundleStorageView) storageView);
 		}
 	}
 

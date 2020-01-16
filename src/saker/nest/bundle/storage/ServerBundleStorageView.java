@@ -146,6 +146,12 @@ public interface ServerBundleStorageView extends BundleStorageView {
 	 * <code>TF_BUILD</code> is for <a href=
 	 * "https://docs.microsoft.com/en-us/azure/devops/pipelines/build/variables?view=azure-devops&tabs=yaml">Azure
 	 * Pipelines</a>.)
+	 * <p>
+	 * Note that caching the index files in the repository storage is unaffected by this parameter. If a non-expired
+	 * cached index file is present in the repository storage, it will be used even if this parameter is set to
+	 * <code>true</code>.
+	 * 
+	 * @since saker.nest 0.8.2
 	 */
 	public static final String PARAMETER_REQUESTS_UNCACHE = "requests.uncache";
 	/**

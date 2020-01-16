@@ -36,10 +36,10 @@ import saker.build.thirdparty.saker.util.io.SerialUtils;
 import saker.nest.ConfiguredRepositoryStorage;
 import saker.nest.NestRepositoryFactory;
 import saker.nest.bundle.BundleIdentifier;
+import saker.nest.bundle.storage.AbstractServerBundleStorageView;
 import saker.nest.bundle.storage.BundleStorageView;
 import saker.nest.bundle.storage.LocalBundleStorageView;
 import saker.nest.bundle.storage.ParameterBundleStorageView;
-import saker.nest.bundle.storage.ServerBundleStorageView;
 import saker.nest.bundle.storage.StorageViewKey;
 import saker.nest.exc.BundleLoadingFailedException;
 
@@ -244,14 +244,14 @@ public class MultiBundleLookup extends AbstractBundleLookup {
 	}
 
 	@Override
-	public Map<String, ? extends ServerBundleStorageView> getServerStorages() {
-		Map<String, ServerBundleStorageView> result = new TreeMap<>();
+	public Map<String, ? extends AbstractServerBundleStorageView> getServerStorages() {
+		Map<String, AbstractServerBundleStorageView> result = new TreeMap<>();
 		collectServerStorages(result);
 		return result;
 	}
 
 	@Override
-	protected void collectServerStorages(Map<String, ? super ServerBundleStorageView> result) {
+	protected void collectServerStorages(Map<String, ? super AbstractServerBundleStorageView> result) {
 		for (AbstractBundleLookup lookup : lookups) {
 			lookup.collectServerStorages(result);
 		}

@@ -82,6 +82,7 @@ import saker.nest.bundle.lookup.SingleBundleLookup;
 import saker.nest.bundle.lookup.TaskLookupInfo;
 import saker.nest.bundle.storage.AbstractBundleStorage;
 import saker.nest.bundle.storage.AbstractBundleStorageView;
+import saker.nest.bundle.storage.AbstractServerBundleStorageView;
 import saker.nest.bundle.storage.AbstractStorageKey;
 import saker.nest.bundle.storage.BundleStorageView;
 import saker.nest.bundle.storage.LocalBundleStorage;
@@ -89,7 +90,6 @@ import saker.nest.bundle.storage.LocalBundleStorageView;
 import saker.nest.bundle.storage.ParameterBundleStorage;
 import saker.nest.bundle.storage.ParameterBundleStorageView;
 import saker.nest.bundle.storage.ServerBundleStorage;
-import saker.nest.bundle.storage.ServerBundleStorageView;
 import saker.nest.bundle.storage.StorageViewKey;
 import saker.nest.dependency.DependencyDomainResolutionResult;
 import saker.nest.dependency.DependencyResolutionLogger;
@@ -580,7 +580,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 	}
 
 	@Override
-	public Map<String, ? extends ServerBundleStorageView> getServerStorages() {
+	public Map<String, ? extends AbstractServerBundleStorageView> getServerStorages() {
 		return lookupConfiguration.getServerStorages();
 	}
 

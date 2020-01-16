@@ -17,8 +17,7 @@ package saker.nest.action.main;
 
 import sipka.cmdline.api.SubCommand;
 
-@SubCommand(name = "upload", type = ServerUploadBundleCommand.class)
-@SubCommand(name = "index", type = ServerIndexCommand.class)
-public class ServerCommand {
+@SubCommand(name = "update", type = ServerIndexUpdateCommand.class)
+public class ServerIndexCommand {
 
 }

@@ -1103,7 +1103,8 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 	private static abstract class IndexManager<T> {
 		public static final int FLAG_OFFLINE = 1 << 0;
 		public static final int FLAG_MISSING_INDEX_ACCEPTABLE = 1 << 1;
-		public static final int FLAG_MISSING_REQUESTS_UNCACHE = 1 << 2;
+		public static final int FLAG_REQUESTS_UNCACHE = 1 << 2;
+		public static final int FLAG_NO_LOADING_FROM_FILE = 1 << 3;
 
 		private static final String INDEX_TYPE_LOOKUP = "lookup";
 		private static final String INDEX_TYPE_INDEX = "index";
@@ -1146,46 +1147,102 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 
 		private T getIndexDataForName(IndexOperationOptions options, String name, String additionalurl,
 				String expectedbase) throws IOException {
-			Index<T> idx = getIndexForName(options, name, additionalurl, expectedbase);
+			Index<T> idx = getIndexForName(options, additionalurl, expectedbase);
 			if (idx == null) {
 				return null;
 			}
-			switch (idx.type) {
-				case INDEX_TYPE_LOOKUP: {
-					return idx.data;
-				}
-				case INDEX_TYPE_INDEX: {
-					if (!ObjectUtils.isNullOrEmpty(idx.nextDataMap)) {
-						List<T> datas = new ArrayList<>(idx.nextDataMap.size());
-						for (Entry<String, String> entry : idx.nextDataMap.entrySet()) {
-							try {
-								T subidxdata = getIndexDataForName(options, name, entry.getValue(), entry.getKey());
-								datas.add(subidxdata);
-							} catch (IOException e) {
-								if (((options.flags
-										& FLAG_MISSING_INDEX_ACCEPTABLE) == FLAG_MISSING_INDEX_ACCEPTABLE)) {
-									options.missingIndexFile(entry.getValue(), getIndexFilePath(entry.getValue()));
+			finish_loop:
+			while (true) {
+				switch (idx.type) {
+					case INDEX_TYPE_LOOKUP: {
+						return idx.data;
+					}
+					case INDEX_TYPE_INDEX: {
+						if (!ObjectUtils.isNullOrEmpty(idx.nextDataMap)) {
+							List<T> datas = new ArrayList<>(idx.nextDataMap.size());
+							for (Entry<String, String> entry : idx.nextDataMap.entrySet()) {
+								String nextbase = entry.getKey();
+								if (!nextbase.startsWith(name)) {
 									continue;
 								}
-								throw e;
+								String nextadditionalurl = entry.getValue();
+								try {
+									T subidxdata = getIndexDataForName(options, name, nextadditionalurl, nextbase);
+									datas.add(subidxdata);
+								} catch (IndexFileCorruptedIOException e) {
+									//requery the index if we find a sub corrupted one
+									if (nextadditionalurl.equals(e.additionalUrl) && nextbase.equals(e.base)) {
+										synchronized (getIndexLock(additionalurl)) {
+											Index<T> cidx = indexes.get(additionalurl);
+											if (cidx != idx) {
+												//the index in the map was changed meanwhile
+												if (cidx != null) {
+													idx = cidx;
+													if (!expectedbase.equals(idx.base)) {
+														throw new IndexFileCorruptedIOException(e, expectedbase,
+																additionalurl);
+													}
+													continue finish_loop;
+												}
+												//the current index is null
+											}
+											try {
+												JSONObject indexobj = makeIndexRequest(options, additionalurl,
+														getIndexFilePath(additionalurl));
+												Index<T> reqindex = parseIndexJSON(options, indexobj, additionalurl,
+														expectedbase);
+												indexes.put(additionalurl, reqindex);
+												if (Objects.equals(idx.identity, reqindex.identity)) {
+													//no modifications were made to the index, and the sub index was found to be corrupted
+													throw new IndexFileCorruptedIOException(e, expectedbase,
+															additionalurl);
+												}
+												idx = reqindex;
+											} catch (JSONException je) {
+												throw new IndexFileCorruptedIOException(e, expectedbase, additionalurl);
+											}
+											indexes.put(additionalurl, idx);
+											if (!expectedbase.equals(idx.base)) {
+												throw new IndexFileCorruptedIOException(e, expectedbase, additionalurl);
+											}
+											continue finish_loop;
+										}
+									}
+									//else throw the exception further
+									if (((options.flags
+											& FLAG_MISSING_INDEX_ACCEPTABLE) == FLAG_MISSING_INDEX_ACCEPTABLE)) {
+										options.missingIndexFile(nextadditionalurl,
+												getIndexFilePath(nextadditionalurl));
+										continue;
+									}
+									throw e;
+								} catch (IOException e) {
+									if (((options.flags
+											& FLAG_MISSING_INDEX_ACCEPTABLE) == FLAG_MISSING_INDEX_ACCEPTABLE)) {
+										options.missingIndexFile(nextadditionalurl,
+												getIndexFilePath(nextadditionalurl));
+										continue;
+									}
+									throw e;
+								}
 							}
+							if (datas.size() == 1) {
+								return datas.get(0);
+							}
+							if (datas.isEmpty()) {
+								return mergeData(Collections.emptyList());
+							}
+							return mergeData(datas);
 						}
-						if (datas.size() == 1) {
-							return datas.get(0);
-						}
-						if (datas.isEmpty()) {
-							return mergeData(Collections.emptyList());
-						}
-						return mergeData(datas);
+						// empty data
+						return mergeData(Collections.emptyList());
 					}
-					// empty data
-					return mergeData(Collections.emptyList());
+					default: {
+						break;
+					}
 				}
-				default: {
-					break;
-				}
+				return null;
 			}
-			return null;
 		}
 
 		private Index<T> parseIndexJSON(IndexOperationOptions options, JSONObject indexobj, String additionalurl,
@@ -1232,11 +1289,13 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 						String expectedidentity = entry.getValue();
 						String splitfileadditionalurl = entry.getKey();
 						JSONObject splitjson;
+						Path splitfileindexpath = getIndexFilePath(splitfileadditionalurl);
 						try {
 							splitjson = makeIndexRequestOrLoadFromFile(options, splitfileadditionalurl,
-									getIndexFilePath(splitfileadditionalurl), expectedidentity);
+									splitfileindexpath, expectedidentity);
 						} catch (IOException e) {
 							if (((options.flags & FLAG_MISSING_INDEX_ACCEPTABLE) == FLAG_MISSING_INDEX_ACCEPTABLE)) {
+								options.missingIndexFile(splitfileadditionalurl, splitfileindexpath);
 								continue;
 							}
 							throw e;
@@ -1273,13 +1332,13 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 			return false;
 		}
 
-		private Index<T> getIndexForName(IndexOperationOptions options, String name, String additionalurl,
-				String expectedbase) throws IOException {
+		private Index<T> getIndexForName(IndexOperationOptions options, String additionalurl, String expectedbase)
+				throws IOException {
 			Index<T> gotidx = indexes.get(additionalurl);
 			index_retriever:
 			while (true) {
 				if (gotidx != null && expectedbase.equals(gotidx.base) && !shouldAttemptIndexReload(gotidx, options)) {
-					break;
+					return gotidx;
 				}
 				synchronized (getIndexLock(additionalurl)) {
 					Index<T> curidx = indexes.get(additionalurl);
@@ -1296,65 +1355,8 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 						throw new IndexFileCorruptedIOException(e, expectedbase, additionalurl);
 					}
 					indexes.put(additionalurl, gotidx);
-					break;
-				}
-			}
-			finish_loop:
-			while (true) {
-				if (INDEX_TYPE_INDEX.equals(gotidx.type)) {
-					NavigableMap<String, String> nextmap = gotidx.nextDataMap;
-					Entry<String, String> subentry = getStartsWithIndexEntry(nextmap, expectedbase, name);
-					if (subentry != null) {
-						String subexpectedbase = subentry.getKey();
-						String subadditonalurl = subentry.getValue();
-						try {
-							return getIndexForName(options, name, subadditonalurl, subexpectedbase);
-						} catch (IndexFileCorruptedIOException e) {
-							if (subadditonalurl.equals(e.additionalUrl) && subexpectedbase.equals(e.base)) {
-								synchronized (getIndexLock(additionalurl)) {
-									Index<T> cidx = indexes.get(additionalurl);
-									if (cidx != gotidx) {
-										//the index in the map was changed meanwhile
-										if (cidx != null) {
-											gotidx = cidx;
-											if (!expectedbase.equals(gotidx.base)) {
-												throw new IndexFileCorruptedIOException(e, expectedbase, additionalurl);
-											}
-											continue finish_loop;
-										}
-										//the current index is null
-									}
-									try {
-										JSONObject indexobj = makeIndexRequest(options, additionalurl,
-												getIndexFilePath(additionalurl));
-										Index<T> reqindex = parseIndexJSON(options, indexobj, additionalurl,
-												expectedbase);
-										indexes.put(additionalurl, reqindex);
-										if (Objects.equals(gotidx.identity, reqindex.identity)) {
-											//no modifications were made to the index, and the sub index was found to be corrupted
-											throw new IndexFileCorruptedIOException(e, expectedbase, additionalurl);
-										}
-										gotidx = reqindex;
-									} catch (JSONException je) {
-										throw new IndexFileCorruptedIOException(e, expectedbase, additionalurl);
-									}
-									indexes.put(additionalurl, gotidx);
-									if (!expectedbase.equals(gotidx.base)) {
-										throw new IndexFileCorruptedIOException(e, expectedbase, additionalurl);
-									}
-									continue finish_loop;
-								}
-							}
-							throw new IndexFileCorruptedIOException(e, expectedbase, additionalurl);
-						}
-					}
-					//no next lookup found
 					return gotidx;
 				}
-				if (INDEX_TYPE_LOOKUP.equals(gotidx.type)) {
-					return gotidx;
-				}
-				throw new IndexFileCorruptedIOException(expectedbase, additionalurl);
 			}
 		}
 
@@ -1367,21 +1369,6 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 			//   completely other directory
 			//e.g. resolving /url against c:/some/directory yields in c:/url
 			return Paths.get(rootDirectory + additionalurl + "/index.json");
-		}
-
-		private static Entry<String, String> getStartsWithIndexEntry(NavigableMap<String, String> nextmap,
-				String expectedbase, String name) {
-			if (Objects.equals(expectedbase, name)) {
-				return ObjectUtils.getEntry(nextmap, name);
-			}
-			for (Entry<String, String> entry : nextmap.subMap(expectedbase, false, name, true).descendingMap()
-					.entrySet()) {
-				String subexpectedbase = entry.getKey();
-				if (name.startsWith(subexpectedbase)) {
-					return entry;
-				}
-			}
-			return null;
 		}
 
 		private Index<T> parseIndexJSONType(JSONObject indexobj, String additionalurl, String base,
@@ -1426,45 +1413,47 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		//this method is synchronized externally
 		private JSONObject makeIndexRequestOrLoadFromFile(IndexOperationOptions options, String additionalurl,
 				Path indexfilepath, String expectedidentity) throws IOException {
-			file_reader:
-			try {
-				boolean acceptcached = (options.flags & FLAG_OFFLINE) == FLAG_OFFLINE;
-				if (expectedidentity == null) {
-					if (!((options.flags & FLAG_OFFLINE) == FLAG_OFFLINE)) {
-						//only check validation of the file if we can make requests
-						//if we are offline, always consider the file valid
-						//we an expected identity was specified, then don't check the expiration, and always read the file and check the identity
-						//    in that case the expiration is checked on the parent index file
-						FileTime lastmodtime = Files.getLastModifiedTime(indexfilepath);
-						long currenttime = System.currentTimeMillis();
-						long modtime = lastmodtime.toMillis();
-						if (modtime > currenttime || modtime + INDEX_INVALIDATION_TIME_MILLIS < currenttime) {
-							//the index file is considered to be expired
-							break file_reader;
-						}
-						acceptcached = true;
-					}
-				}
-				try (InputStream is = Files.newInputStream(indexfilepath);
-						InputStreamReader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
-					JSONObject result = new JSONObject(new JSONTokener(reader));
-					//we accept the cached file if
-					//    we're offline (or cache not expired) and expect no identity
-					//    or the identity is the same as the expected
+			if (((options.flags & FLAG_NO_LOADING_FROM_FILE) != FLAG_NO_LOADING_FROM_FILE)) {
+				file_reader:
+				try {
+					boolean acceptcached = (options.flags & FLAG_OFFLINE) == FLAG_OFFLINE;
 					if (expectedidentity == null) {
-						if (acceptcached) {
-							//notify the options about the non-query reuse
-							//the operation initiator may issue async load request if appropriate
-							options.indexFileOfflineReused(additionalurl, indexfilepath);
+						if (!((options.flags & FLAG_OFFLINE) == FLAG_OFFLINE)) {
+							//only check validation of the file if we can make requests
+							//if we are offline, always consider the file valid
+							//we an expected identity was specified, then don't check the expiration, and always read the file and check the identity
+							//    in that case the expiration is checked on the parent index file
+							FileTime lastmodtime = Files.getLastModifiedTime(indexfilepath);
+							long currenttime = System.currentTimeMillis();
+							long modtime = lastmodtime.toMillis();
+							if (modtime > currenttime || modtime + INDEX_INVALIDATION_TIME_MILLIS < currenttime) {
+								//the index file is considered to be expired
+								break file_reader;
+							}
+							acceptcached = true;
+						}
+					}
+					try (InputStream is = Files.newInputStream(indexfilepath);
+							InputStreamReader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
+						JSONObject result = new JSONObject(new JSONTokener(reader));
+						//we accept the cached file if
+						//    we're offline (or cache not expired) and expect no identity
+						//    or the identity is the same as the expected
+						if (expectedidentity == null) {
+							if (acceptcached) {
+								//notify the options about the non-query reuse
+								//the operation initiator may issue async load request if appropriate
+								options.indexFileOfflineReused(additionalurl, indexfilepath);
+								return result;
+							}
+						} else if (expectedidentity.equals(result.getString("identity"))) {
 							return result;
 						}
-					} else if (expectedidentity.equals(result.getString("identity"))) {
-						return result;
+						//can't accept cached file
 					}
-					//can't accept cached file
+				} catch (IOException | JSONException e) {
+					//the index file doesn't exist or cant be read
 				}
-			} catch (IOException | JSONException e) {
-				//the index file doesn't exist or cant be read
 			}
 			return makeIndexRequest(options, additionalurl, indexfilepath);
 		}
@@ -1477,7 +1466,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 				throw new OfflineStorageIndexIOException(additionalurl, indexfilepath);
 			}
 			JSONObject resultjson;
-			if (indexSecondaryRootUrl != null) {
+			if (indexSecondaryRootUrl != null && ((options.flags & FLAG_REQUESTS_UNCACHE) != FLAG_REQUESTS_UNCACHE)) {
 				try {
 					resultjson = makeJsonIndexRequest(options, additionalurl, indexSecondaryRootUrl);
 				} catch (ServerConnectionFailedIOException e) {
@@ -1531,7 +1520,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 				String rooturl) throws IOException {
 			boolean offline = (options.flags & FLAG_OFFLINE) == FLAG_OFFLINE;
 			String url = rooturl + additionalurl;
-			if (((options.flags & FLAG_MISSING_REQUESTS_UNCACHE) == FLAG_MISSING_REQUESTS_UNCACHE)) {
+			if (((options.flags & FLAG_REQUESTS_UNCACHE) == FLAG_REQUESTS_UNCACHE)) {
 				url += "?uncache-" + UUID.randomUUID();
 			}
 			return makeServerRequest(offline, url, (rc, ins, errs, headerfunc) -> {
@@ -1548,6 +1537,10 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		protected abstract T generateData(Collection<JSONObject> lookups);
 
 		protected abstract T mergeData(Collection<? extends T> datas);
+
+		public void updateIndexFiles() throws IOException {
+			getIndexForName(new IndexOperationOptions(FLAG_NO_LOADING_FROM_FILE | FLAG_REQUESTS_UNCACHE), "");
+		}
 	}
 
 	private static final class TasksIndexManager
@@ -1756,7 +1749,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		}
 	}
 
-	private class ServerBundleStorageViewImpl extends AbstractBundleStorageView implements ServerBundleStorageView {
+	private class ServerBundleStorageViewImpl extends AbstractServerBundleStorageView {
 		private final StorageViewKey storageViewKey;
 
 		private final boolean offline;
@@ -1773,7 +1766,23 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 			this.storageViewKey = new ServerStorageViewKeyImpl(ServerBundleStorage.this.getStorageKey(), offline,
 					signatureVerificationConfiguration);
 			this.offline = offline;
-			this.uncacheRequestsIndexFlag = uncacherequests ? IndexManager.FLAG_MISSING_REQUESTS_UNCACHE : 0;
+			this.uncacheRequestsIndexFlag = uncacherequests ? IndexManager.FLAG_REQUESTS_UNCACHE : 0;
+		}
+
+		@Override
+		public void updateBundleIndexFiles() throws IOException {
+			if (offline) {
+				throw new OfflineStorageIOException("Cannot update index files in offline mode.");
+			}
+			packageBundlesIndexManager.updateIndexFiles();
+		}
+
+		@Override
+		public void updateTaskIndexFiles() throws IOException {
+			if (offline) {
+				throw new OfflineStorageIOException("Cannot update index files in offline mode.");
+			}
+			tasksIndexManager.updateIndexFiles();
 		}
 
 		@Override
