@@ -211,10 +211,12 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 	}
 
 	private static final String BUNDLE_STORAGE_DIRECTORY_NAME = "bundle_storage";
+	private static final String BUNDLES_DIRECTORY_NAME = "bundles";
 	private static final String BUNDLE_LIB_STORAGE_DIRECTORY_NAME = "bundle_lib_storage";
 
 	private final String serverHost;
 	private final Path storageDirectory;
+	private final Path bundlesDirectory;
 
 	private final ConcurrentSkipListMap<BundleIdentifier, Object> bundleLoadLocks = new ConcurrentSkipListMap<>();
 	private final NavigableMap<BundleIdentifier, LoadedBundleState> loadedBundles = new ConcurrentSkipListMap<>();
@@ -394,6 +396,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		this.storageKey = storagekey;
 		this.serverHost = storagekey.serverHost;
 		this.storageDirectory = LocalFileProvider.toRealPath(storagekey.storageDirectory);
+		this.bundlesDirectory = storageDirectory.resolve(BUNDLES_DIRECTORY_NAME);
 		this.packageBundlesIndexManager = new BundlesIndexManager(this.storageDirectory.resolve("index/bundles"),
 				createAppendedUrlOrNull(serverHost, "/bundles/index"),
 				createAppendedUrlOrNull(storagekey.serverSecondaryHost, "/bundles/index"));
@@ -515,13 +518,14 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 	@Override
 	public Path getBundleStoragePath(NestRepositoryBundle bundle)
 			throws NullPointerException, IllegalArgumentException {
-		return storageDirectory.resolve(BUNDLE_STORAGE_DIRECTORY_NAME).resolve(bundle.getBundleIdentifier().toString());
+		return BundleUtils.getVersionedBundleJarPath(storageDirectory.resolve(BUNDLE_STORAGE_DIRECTORY_NAME),
+				bundle.getBundleIdentifier());
 	}
 
 	@Override
 	public Path getBundleLibStoragePath(NestRepositoryBundle bundle) {
-		return storageDirectory.resolve(BUNDLE_LIB_STORAGE_DIRECTORY_NAME)
-				.resolve(bundle.getBundleIdentifier().toString());
+		return BundleUtils.getVersionedBundleJarPath(storageDirectory.resolve(BUNDLE_LIB_STORAGE_DIRECTORY_NAME),
+				bundle.getBundleIdentifier());
 	}
 
 	public String getServerHost() {
@@ -1941,7 +1945,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 					throw new BundleLoadingFailedException("Storage closed.");
 				}
 				//load the bundle ourselves
-				Path bundlejarpath = BundleUtils.getVersionedBundleJarPath(storageDirectory, bundleid);
+				Path bundlejarpath = BundleUtils.getVersionedBundleJarPath(bundlesDirectory, bundleid);
 				if (Files.isRegularFile(bundlejarpath)) {
 					try {
 						JarNestRepositoryBundleImpl created = JarNestRepositoryBundleImpl
