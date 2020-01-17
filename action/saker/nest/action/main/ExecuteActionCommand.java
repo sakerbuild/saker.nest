@@ -20,10 +20,11 @@ import saker.nest.NestRepositoryImpl;
 import sipka.cmdline.api.Command;
 import sipka.cmdline.api.SubCommand;
 
-@Command(className = ".ExecuteAction", helpCommand = { "help", "?" })
+@Command(className = ".ExecuteAction", helpCommand = { "help", "-help", "--help", "?", "/?" })
 @SubCommand(name = "main", type = MainCommand.class)
 @SubCommand(name = "local", type = LocalCommand.class)
 @SubCommand(name = "server", type = ServerCommand.class)
+@SubCommand(name = { "version", "-version", "--version" }, type = VersionCommand.class)
 public abstract class ExecuteActionCommand {
 	protected NestRepositoryImpl repository;
 
