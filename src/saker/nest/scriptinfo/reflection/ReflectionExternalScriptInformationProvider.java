@@ -114,6 +114,8 @@ public class ReflectionExternalScriptInformationProvider implements ExternalScri
 					continue;
 				}
 				//XXX provide more information about the bundle
+				result.add(informationContext.getBundleLiteralInformation(bundleid.withoutAnyQualifiers()));
+				result.add(informationContext.getBundleLiteralInformation(bundleid.withoutMetaQualifiers()));
 				result.add(informationContext.getBundleLiteralInformation(bundleid));
 			}
 			return result;

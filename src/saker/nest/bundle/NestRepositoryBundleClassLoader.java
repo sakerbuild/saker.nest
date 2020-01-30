@@ -45,6 +45,7 @@ import saker.build.util.java.JavaTools;
 import saker.nest.ConfiguredRepositoryStorage;
 import saker.nest.NestRepositoryImpl;
 import saker.nest.bundle.lookup.BundleLookup;
+import testing.saker.nest.TestFlag;
 
 public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader implements NestBundleClassLoader {
 
@@ -310,9 +311,13 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 				//else if the temp dir is null, we still export the library to the original path, and hope for the best for loading
 				//    failing is acceptable in that case
 			}
-			// lock on a class loading lock with the specified lib entry name
-			// the method doesn't check for a valid class name so we're fine by passing the entry name
-			synchronized (getClassLoadingLock(libentrynamename)) {
+			if (TestFlag.ENABLED) {
+				libpath = TestFlag.metric().overrideNativeLibraryPath(this, libpath);
+				libdirpath = libpath.getParent();
+			}
+			//lock on a vm-common string for the library path to avoid concurrent loading
+			//XXX maybe we should do file-system level locking to deal with concurrent processes as well
+			synchronized (("nest-lib-load-lock:" + libpath).intern()) {
 				Files.createDirectories(libdirpath);
 				if (getFileSizeOrNegative(libpath) != bytes.getLength()) {
 					Path temppath = libpath.resolveSibling(UUID.randomUUID() + ".templib");

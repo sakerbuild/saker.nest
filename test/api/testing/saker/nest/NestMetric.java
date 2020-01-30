@@ -17,6 +17,7 @@ package testing.saker.nest;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Path;
 import java.security.NoSuchAlgorithmException;
 import java.security.PublicKey;
 import java.util.Collections;
@@ -69,5 +70,9 @@ public interface NestMetric {
 
 	public default Boolean overrideServerUncacheRequestsValue() {
 		return false;
+	}
+
+	public default Path overrideNativeLibraryPath(ClassLoader cl, Path libpath) {
+		return libpath;
 	}
 }

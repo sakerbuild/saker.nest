@@ -35,7 +35,7 @@ import testing.saker.nest.NestMetric;
 
 public abstract class NestRepositoryCachingEnvironmentTestCase
 		extends RepositoryLoadingVariablesMetricEnvironmentTestCase {
-	private NestMetric hashCacherMetric;
+	private NestMetric repositoryCachingMetric;
 
 	@Override
 	protected boolean isRepositoriesCacheable() {
@@ -44,9 +44,13 @@ public abstract class NestRepositoryCachingEnvironmentTestCase
 
 	@Override
 	protected final void runTestImpl() throws Throwable {
-		hashCacherMetric = new RepositoryCachingNestMetric();
-		testing.saker.nest.TestFlag.set(hashCacherMetric);
+		repositoryCachingMetric = createNestMetric();
+		testing.saker.nest.TestFlag.set(repositoryCachingMetric);
 		runNestTaskTestImpl();
+	}
+
+	protected RepositoryCachingNestMetric createNestMetric() {
+		return new RepositoryCachingNestMetric();
 	}
 
 	protected abstract void runNestTaskTestImpl() throws Throwable;
@@ -74,7 +78,7 @@ public abstract class NestRepositoryCachingEnvironmentTestCase
 		});
 	}
 
-	private final class RepositoryCachingNestMetric implements NestMetric {
+	protected final class RepositoryCachingNestMetric implements NestMetric {
 		private Map<PathKey, FileHashResult> hashes = new ConcurrentHashMap<>();
 
 		public RepositoryCachingNestMetric() {
