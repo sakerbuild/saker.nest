@@ -22,6 +22,7 @@ import java.io.ObjectInput;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutput;
 import java.io.ObjectOutputStream;
+import java.io.ObjectStreamClass;
 import java.io.OutputStream;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
@@ -471,7 +472,16 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 			}
 			infoFileChannel.position(0);
 			try (ObjectInputStream in = new ObjectInputStream(new UnsyncBufferedInputStream(
-					StreamUtils.closeProtectedInputStream(Channels.newInputStream(infoFileChannel))))) {
+					StreamUtils.closeProtectedInputStream(Channels.newInputStream(infoFileChannel)))) {
+				@Override
+				protected Class<?> resolveClass(ObjectStreamClass desc) throws IOException, ClassNotFoundException {
+					try {
+						return super.resolveClass(desc);
+					} catch (ClassNotFoundException e) {
+						return Class.forName(desc.getName(), false, LocalBundleStorage.class.getClassLoader());
+					}
+				}
+			}) {
 				int serialversion = in.readInt();
 				if (serialversion != 1) {
 					return false;
