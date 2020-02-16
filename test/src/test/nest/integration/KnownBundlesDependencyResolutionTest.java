@@ -28,6 +28,7 @@ import java.util.regex.Pattern;
 import saker.build.file.path.SakerPath;
 import saker.build.file.provider.LocalFileProvider;
 import saker.build.runtime.repository.SakerRepository;
+import saker.build.thirdparty.saker.util.ImmutableUtils;
 import saker.build.thirdparty.saker.util.ObjectUtils;
 import saker.build.thirdparty.saker.util.function.Functionals;
 import saker.nest.bundle.BundleIdentifier;
@@ -47,6 +48,13 @@ public class KnownBundlesDependencyResolutionTest extends ManualLoadedRepository
 
 	public static class SimpleMain {
 		private static final Pattern PATTERN_JDK = Pattern.compile("jdk[0-9]+");
+
+		/**
+		 * Some bundles have known compatibility errors. Don't examine them.
+		 */
+		public static final Set<BundleIdentifier> ERRONEOUS_BUNDLES = ImmutableUtils
+				.makeImmutableNavigableSet(new BundleIdentifier[] { BundleIdentifier.valueOf("saker.msvc-v0.8.2"),
+						BundleIdentifier.valueOf("saker.msvc-v0.8.1"), BundleIdentifier.valueOf("saker.msvc-v0.8.0") });
 
 		public static void main(String[] args) throws Throwable {
 			System.setProperty(PROPERTY_NAME, args[0]);
@@ -115,6 +123,9 @@ public class KnownBundlesDependencyResolutionTest extends ManualLoadedRepository
 						throw new AssertionError("No version found of: " + bundlename);
 					}
 					for (BundleIdentifier bid : versions.getBundles()) {
+						if (ERRONEOUS_BUNDLES.contains(bid)) {
+							continue;
+						}
 						System.out.println("Test " + bid);
 						ClassLoader loadedcl = storageconfig.getBundleClassLoader(lookup, bid);
 						NestBundleClassLoader bcl = (NestBundleClassLoader) loadedcl;
@@ -137,15 +148,19 @@ public class KnownBundlesDependencyResolutionTest extends ManualLoadedRepository
 									|| bundlename.equals(BundleIdentifier.valueOf("saker.build-test-utils"))) {
 								continue;
 							}
-							Class<?> c = Class.forName(entry.replace('/', '.').substring(0, entry.length() - 6), true,
-									loadedcl);
-							//examine the reflection elements as they may trigger other loading things
-							exhaustMethods(c.getMethods());
-							exhaustMethods(c.getDeclaredMethods());
-							exhaustFields(c.getFields());
-							exhaustFields(c.getDeclaredFields());
-							c.getEnumConstants();
-							c.getAnnotations();
+							String cname = entry.replace('/', '.').substring(0, entry.length() - 6);
+							try {
+								Class<?> c = Class.forName(cname, true, loadedcl);
+								//examine the reflection elements as they may trigger other loading things
+								exhaustMethods(c.getMethods());
+								exhaustMethods(c.getDeclaredMethods());
+								exhaustFields(c.getFields());
+								exhaustFields(c.getDeclaredFields());
+								c.getEnumConstants();
+								c.getAnnotations();
+							} catch (Exception | NoClassDefFoundError e) {
+								throw new AssertionError("Failed to process: " + cname + " in " + bid, e);
+							}
 						}
 					}
 				}
