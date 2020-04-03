@@ -143,9 +143,8 @@ public interface ServerBundleStorageView extends BundleStorageView {
 	 * value of this parameter is <code>true</code>. Otherwise <code>false</code>.
 	 * <p>
 	 * (The environment variables are determined by known CI providers. While <code>CI</code> is supported by many,
-	 * <code>TF_BUILD</code> is for <a href=
-	 * "https://docs.microsoft.com/en-us/azure/devops/pipelines/build/variables?view=azure-devops&tabs=yaml">Azure
-	 * Pipelines</a>.)
+	 * <code>TF_BUILD</code> is for
+	 * <a href="https://docs.microsoft.com/en-us/azure/devops/pipelines/build/variables">Azure Pipelines</a>.)
 	 * <p>
 	 * Note that caching the index files in the repository storage is unaffected by this parameter. If a non-expired
 	 * cached index file is present in the repository storage, it will be used even if this parameter is set to
