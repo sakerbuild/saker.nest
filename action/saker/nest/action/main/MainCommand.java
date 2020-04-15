@@ -32,7 +32,9 @@ import saker.nest.ConfiguredRepositoryStorage;
 import saker.nest.NestRepositoryFactory;
 import saker.nest.bundle.BundleIdentifier;
 import saker.nest.bundle.BundleInformation;
+import saker.nest.bundle.BundleKey;
 import saker.nest.bundle.NestRepositoryBundleClassLoader;
+import saker.nest.bundle.lookup.BundleVersionLookupResult;
 import saker.nest.exc.BundleLoadingFailedException;
 import sipka.cmdline.api.Converter;
 import sipka.cmdline.api.Parameter;
@@ -138,7 +140,18 @@ public class MainCommand {
 
 	private Method getMainMethod(BundleIdentifier bundleid, ConfiguredRepositoryStorage configuredstorage)
 			throws BundleLoadingFailedException, ClassNotFoundException, NoSuchMethodException {
-		NestRepositoryBundleClassLoader bundlecl = configuredstorage.getBundleClassLoader(bundleid);
+		NestRepositoryBundleClassLoader bundlecl;
+		if (bundleid.getVersionQualifier() == null) {
+			BundleVersionLookupResult versions = configuredstorage.getBundleLookup().lookupBundleVersions(bundleid);
+			if (versions == null) {
+				throw new BundleLoadingFailedException("No bundle found for identifier: " + bundleid);
+			}
+			bundleid = versions.getBundles().iterator().next();
+			bundlecl = configuredstorage
+					.getBundleClassLoader(BundleKey.create(versions.getStorageView().getStorageViewKey(), bundleid));
+		} else {
+			bundlecl = configuredstorage.getBundleClassLoader(bundleid);
+		}
 		String cn = this.mainClassName;
 		if (cn == null) {
 			BundleInformation bundleinfo = bundlecl.getBundle().getInformation();

@@ -637,6 +637,9 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 			}
 			URL url = new URL(requesturl);
 			HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+			//set some timeout for the request not to deadlock the build
+			connection.setConnectTimeout(30000);
+			connection.setReadTimeout(30000);
 			connection.setRequestProperty("Accept-Encoding", "gzip");
 			if (method != null) {
 				connection.setRequestMethod(method);

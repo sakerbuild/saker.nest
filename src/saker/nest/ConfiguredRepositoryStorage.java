@@ -590,7 +590,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 	}
 
 	@Override
-	public ClassLoader getBundleClassLoader(BundleLookup lookup, BundleIdentifier bundleid)
+	public NestRepositoryBundleClassLoader getBundleClassLoader(BundleLookup lookup, BundleIdentifier bundleid)
 			throws NullPointerException, BundleLoadingFailedException {
 		if (lookup == null) {
 			lookup = this.lookupConfiguration;
@@ -600,7 +600,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 	}
 
 	@Override
-	public ClassLoader getBundleClassLoader(BundleKey bundlekey)
+	public NestRepositoryBundleClassLoader getBundleClassLoader(BundleKey bundlekey)
 			throws NullPointerException, BundleLoadingFailedException, BundleDependencyUnsatisfiedException {
 		Objects.requireNonNull(bundlekey, "bundle key");
 		StorageViewKey storageviewkey = bundlekey.getStorageViewKey();

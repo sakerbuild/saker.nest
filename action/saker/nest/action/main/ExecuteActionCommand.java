@@ -20,7 +20,7 @@ import saker.nest.NestRepositoryImpl;
 import sipka.cmdline.api.Command;
 import sipka.cmdline.api.SubCommand;
 
-@Command(className = ".ExecuteAction", helpCommand = { "help", "-help", "--help", "?", "/?" })
+@Command(className = ".ExecuteAction", helpCommand = { "-h", "help", "-help", "--help", "?", "/?" })
 @SubCommand(name = "main", type = MainCommand.class)
 @SubCommand(name = "local", type = LocalCommand.class)
 @SubCommand(name = "server", type = ServerCommand.class)
