@@ -18,12 +18,12 @@ package saker.nest.action.main;
 import java.io.IOException;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NavigableMap;
 import java.util.Set;
+import java.util.TreeMap;
 
 import saker.build.exception.InvalidPathFormatException;
 import saker.build.file.path.SakerPath;
@@ -41,20 +41,73 @@ import sipka.cmdline.api.Converter;
 import sipka.cmdline.api.Parameter;
 import sipka.cmdline.api.PositionalParameter;
 
+/**
+ * <pre>
+ * Installs the specified bundle(s) to the local bundle storage.
+ * 
+ * The command will take the specified bundles and place them
+ * in the local bundle storage. Other agents in the system will
+ * be able to use these installed bundles.
+ * 
+ * Any already existing bundle(s) with the same identifier will
+ * be overwritten.
+ * </pre>
+ */
 public class LocalInstallBundleCommand {
-	@Parameter("-repo-id")
-	public String repositoryId = NestRepositoryFactory.IDENTIFIER;
-
-	@Parameter("-U")
-	public Map<String, String> userParameters = new LinkedHashMap<>();
-
-	@Parameter("-storage")
-	public String storage = ConfiguredRepositoryStorage.STORAGE_TYPE_LOCAL;
-
+	/**
+	 * <pre>
+	 * One or more paths to the bundles that should be installed.
+	 * 
+	 * The paths can also be wildcards, e.g. *.jar to install
+	 * all Java archives in the current directory as saker.nest bundles.
+	 * </pre>
+	 */
 	@Parameter
 	@PositionalParameter(value = -1)
 	@Converter(method = "parseRemainingCommand")
 	public Set<String> bundles = new LinkedHashSet<>();
+
+	/**
+	 * <pre>
+	 * Specifies the identifier of the repository.
+	 * 
+	 * The identifier is used to properly determine the 
+	 * configuration user parameters from the -U arguments.
+	 * 
+	 * It is "nest" by default.
+	 * </pre>
+	 */
+	@Parameter("-repo-id")
+	public String repositoryId = NestRepositoryFactory.IDENTIFIER;
+
+	/**
+	 * <pre>
+	 * Sets the name of the local bundle storage to where the bundle(s)
+	 * should be installed.
+	 * 
+	 * It is "local" by default.
+	 * </pre>
+	 */
+	@Parameter("-storage")
+	public String storage = ConfiguredRepositoryStorage.STORAGE_TYPE_LOCAL;
+
+	private Map<String, String> userParameters = new TreeMap<>();
+
+	/**
+	 * <pre>
+	 * Specifies the user parameters for configuring the repository.
+	 * 
+	 * This string key-value pairs are interpreted the same way as the
+	 * -U user parameters for the build execution.
+	 * </pre>
+	 */
+	@Parameter("-U")
+	public void userParameter(String key, String value) {
+		if (userParameters.containsKey(key)) {
+			throw new IllegalArgumentException("User parameter specified multiple times: " + key);
+		}
+		userParameters.put(key, value);
+	}
 
 	public void call(ExecuteActionCommand execute) throws InvalidPathFormatException, IOException {
 		Set<WildcardPath> wildcards = new LinkedHashSet<>();
@@ -101,4 +154,5 @@ public class LocalInstallBundleCommand {
 		}
 		return result;
 	}
+
 }

@@ -16,7 +16,6 @@
 package saker.nest.action.main;
 
 import java.io.IOException;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
@@ -35,18 +34,64 @@ import saker.nest.bundle.storage.AbstractServerBundleStorageView;
 import sipka.cmdline.api.MultiParameter;
 import sipka.cmdline.api.Parameter;
 
+/**
+ * <pre>
+ * Updates the index files for the server bundle storage.
+ * 
+ * The command will freshen up the index files and retrieve
+ * the latest ones from the associated servers.
+ * 
+ * Invoking this command can be useful if you've just published
+ * a package and want to see its results as soon as possible.
+ * Without the manual update of the index files, seeing the published
+ * package may take some time.
+ * </pre>
+ */
 public class ServerIndexUpdateCommand {
-	@Parameter("-repo-id")
-	public String repositoryId = NestRepositoryFactory.IDENTIFIER;
 
-	@Parameter("-U")
-	public Map<String, String> userParameters = new LinkedHashMap<>();
-
+	/**
+	 * <pre>
+	 * Specifies the names of the configured server bundle storages
+	 * of which the index files should be updated.
+	 * </pre>
+	 */
 	@Parameter("-storage")
 	@MultiParameter(String.class)
 	public Set<String> storage = new TreeSet<>();
 
+	/**
+	 * <pre>
+	 * Specifies the identifier of the repository.
+	 * 
+	 * The identifier is used to properly determine the 
+	 * configuration user parameters from the -U arguments.
+	 * 
+	 * It is "nest" by default.
+	 * </pre>
+	 */
+	@Parameter("-repo-id")
+	public String repositoryId = NestRepositoryFactory.IDENTIFIER;
+
+	private Map<String, String> userParameters = new TreeMap<>();
+
+	/**
+	 * <pre>
+	 * Specifies the user parameters for configuring the repository.
+	 * 
+	 * This string key-value pairs are interpreted the same way as the
+	 * -U user parameters for the build execution.
+	 * </pre>
+	 */
+	@Parameter("-U")
+	public void userParameter(String key, String value) {
+		if (userParameters.containsKey(key)) {
+			throw new IllegalArgumentException("User parameter specified multiple times: " + key);
+		}
+		userParameters.put(key, value);
+	}
+
 	public void call(ExecuteActionCommand execute) throws InvalidPathFormatException, IOException {
+		boolean displayedavailable = false;
 		try (ConfiguredRepositoryStorage configuredstorage = new ConfiguredRepositoryStorage(execute.repository,
 				repositoryId, ExecutionPathConfiguration.local(SakerPath.valueOf(System.getProperty("user.dir"))),
 				userParameters)) {
@@ -59,8 +104,12 @@ public class ServerIndexUpdateCommand {
 				for (String s : storage) {
 					AbstractServerBundleStorageView storage = serverstorages.get(s);
 					if (storage != null) {
-						System.out.println("Warning: No server storage found for name: " + s + " Available: "
-								+ StringUtils.toStringJoin(", ", serverstorages.keySet()));
+						System.out.println("Warning: No server storage found for name: " + s);
+						if (!displayedavailable) {
+							displayedavailable = true;
+							System.out.println(
+									"    Available: " + StringUtils.toStringJoin(", ", serverstorages.keySet()));
+						}
 					} else {
 						updatestorages.put(s, storage);
 					}

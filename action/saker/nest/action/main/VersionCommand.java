@@ -17,7 +17,7 @@ package saker.nest.action.main;
 
 /**
  * <pre>
- * Displays the version information of the saker.nest repository.
+ * Displays the version information about the saker.nest repository.
  * </pre>
  */
 public class VersionCommand {

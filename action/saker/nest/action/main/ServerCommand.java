@@ -17,6 +17,11 @@ package saker.nest.action.main;
 
 import sipka.cmdline.api.SubCommand;
 
+/**
+ * <pre>
+ * Top level command for interaction with the server bundle storage.
+ * </pre>
+ */
 @SubCommand(name = "upload", type = ServerUploadBundleCommand.class)
 @SubCommand(name = "index", type = ServerIndexCommand.class)
 public class ServerCommand {

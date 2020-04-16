@@ -20,6 +20,13 @@ import saker.nest.NestRepositoryImpl;
 import sipka.cmdline.api.Command;
 import sipka.cmdline.api.SubCommand;
 
+/**
+ * <pre>
+ * saker.nest repository command line action interface.
+ * 
+ * See subcommands for available actions.
+ * </pre>
+ */
 @Command(className = ".ExecuteAction", helpCommand = { "-h", "help", "-help", "--help", "?", "/?" })
 @SubCommand(name = "main", type = MainCommand.class)
 @SubCommand(name = "local", type = LocalCommand.class)

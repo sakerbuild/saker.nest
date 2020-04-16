@@ -17,6 +17,11 @@ package saker.nest.action.main;
 
 import sipka.cmdline.api.SubCommand;
 
+/**
+ * <pre>
+ * Top level command for interaction with the local bundle storage.
+ * </pre>
+ */
 @SubCommand(name = "install", type = LocalInstallBundleCommand.class)
 public class LocalCommand {
 

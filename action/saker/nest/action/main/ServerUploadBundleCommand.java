@@ -35,21 +35,63 @@ import sipka.cmdline.api.Parameter;
 import sipka.cmdline.api.PositionalParameter;
 import sipka.cmdline.runtime.ParsingIterator;
 
+/**
+ * <pre>
+ * Uploads a single bundle to the specified saker.nest repository.
+ * </pre>
+ */
 public class ServerUploadBundleCommand {
+	/**
+	 * <pre>
+	 * The URL of the server to which the upload should be performed.
+	 * 
+	 * It is https://api.nest.saker.build by default.
+	 * </pre>
+	 */
 	@Parameter("-server")
 	public String server = ServerBundleStorageView.REPOSITORY_DEFAULT_SERVER_URL;
 
+	/**
+	 * <pre>
+	 * Flag specifying that the already existing bundles can be overwritten.
+	 * 
+	 * If not set, the server will decide whether or not the bundles may be
+	 * overwritten.
+	 * </pre>
+	 */
 	@Flag
 	@Parameter("-overwrite")
-	public boolean overwrite = false;
+	public Boolean overwrite = null;
 
+	/**
+	 * <pre>
+	 * Specifies the API Key to be used for the upload request.
+	 * 
+	 * The argument is expected to be in URL safe Base64 format.
+	 * </pre>
+	 */
 	@Parameter(value = "-api-key", required = true)
 	@Converter(method = "parseBase64Key")
 	public byte[] apiKey;
+	/**
+	 * <pre>
+	 * Specifies the API Secret to be used for the upload request.
+	 * 
+	 * The argument is expected to be in URL safe Base64 format.
+	 * </pre>
+	 */
 	@Parameter(value = "-api-secret", required = true)
 	@Converter(method = "parseBase64Key")
 	public byte[] apiSecret;
 
+	/**
+	 * <pre>
+	 * Path to the bundle to upload.
+	 * 
+	 * The specified Java archive should be a valid saker.nest bundle.
+	 * If not, an exception is thrown before the upload request is initiated.
+	 * </pre>
+	 */
 	@Parameter(value = "file", required = true)
 	@PositionalParameter(-1)
 	@Converter(method = "parseRemainingPathCommand")

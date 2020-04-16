@@ -17,6 +17,12 @@ package saker.nest.action.main;
 
 import sipka.cmdline.api.SubCommand;
 
+/**
+ * <pre>
+ * Top level command for interaction with the index
+ * management of the server bundle storage.
+ * </pre>
+ */
 @SubCommand(name = "update", type = ServerIndexUpdateCommand.class)
 public class ServerIndexCommand {
 
