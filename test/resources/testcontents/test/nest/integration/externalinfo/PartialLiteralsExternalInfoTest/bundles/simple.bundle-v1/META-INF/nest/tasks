@@ -1,0 +1,2 @@
+simple.task=test.nest.integration.execution.ServerStorageTaskTest$SimpleTask
+six.task=test.nest.integration.execution.ServerStorageTaskTest$SimpleTask

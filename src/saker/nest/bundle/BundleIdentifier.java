@@ -264,11 +264,45 @@ public final class BundleIdentifier implements Comparable<BundleIdentifier>, Ext
 
 	/**
 	 * Checks if this bundle identifier has any normal or meta qualifiers.
+	 * <p>
+	 * This method is the same as the following:
+	 * 
+	 * <pre>
+	 * !hasNormalQualifiers() && !hasMetaQualifiers()
+	 * </pre>
 	 * 
 	 * @return <code>true</code> if there are any qualifiers present.
+	 * @see #hasNormalQualifiers()
+	 * @see #hasMetaQualifiers()
 	 */
 	public boolean hasAnyQualifiers() {
 		return !this.qualifiers.isEmpty() || !this.metaQualifiers.isEmpty();
+	}
+
+	/**
+	 * Checks if this bundle identifier has any meta qualifiers.
+	 * 
+	 * @return <code>true</code> if there are any meta qualifiers present.
+	 * @since saker.nest 0.8.3
+	 * @see #hasAnyQualifiers()
+	 * @see #hasNormalQualifiers()
+	 */
+	public boolean hasMetaQualifiers() {
+		return !this.metaQualifiers.isEmpty();
+	}
+
+	/**
+	 * Checks if this bundle identifier has any normal qualifiers.
+	 * <p>
+	 * This check doesn't include the meta qualifiers.
+	 * 
+	 * @return <code>true</code> if there are any normal qualifiers present.
+	 * @since saker.nest 0.8.3
+	 * @see #hasAnyQualifiers()
+	 * @see #hasMetaQualifiers()
+	 */
+	public boolean hasNormalQualifiers() {
+		return !this.qualifiers.isEmpty();
 	}
 
 	/**

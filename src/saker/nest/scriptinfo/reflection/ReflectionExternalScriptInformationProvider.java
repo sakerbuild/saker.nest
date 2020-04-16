@@ -16,12 +16,17 @@
 package saker.nest.scriptinfo.reflection;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.NavigableSet;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
@@ -40,6 +45,8 @@ import saker.nest.bundle.BundleIdentifier;
 import saker.nest.scriptinfo.reflection.annot.NestInformation;
 
 public class ReflectionExternalScriptInformationProvider implements ExternalScriptInformationProvider {
+	private static final BundleIdentifier[] EMPTY_BUNDLEIDENTIFIER_ARRAY = new BundleIdentifier[0];
+
 	private final NestBuildRepositoryImpl repository;
 	private final ReflectionInformationContext informationContext;
 
@@ -66,15 +73,27 @@ public class ReflectionExternalScriptInformationProvider implements ExternalScri
 	@Override
 	public Map<TaskName, ? extends TaskInformation> getTasks(String tasknamekeyword) {
 		NavigableSet<TaskName> tasknames = repository.getPresentTaskNamesForInformationProvider();
-		Map<TaskName, TaskInformation> result = new TreeMap<>();
-		if (tasknamekeyword == null) {
-			for (TaskName tn : tasknames) {
-				tn = getTaskNameWithoutVersionQualifiers(tn);
-				result.putIfAbsent(tn, informationContext.getTaskInformation(tn));
-			}
-		} else {
-			for (TaskName tn : tasknames) {
-				if (tn.getName().startsWith(tasknamekeyword)) {
+		Map<TaskName, TaskInformation> result = new LinkedHashMap<>();
+		if (!ObjectUtils.isNullOrEmpty(tasknames)) {
+			if (tasknamekeyword == null) {
+				for (TaskName tn : tasknames) {
+					tn = getTaskNameWithoutVersionQualifiers(tn);
+					result.putIfAbsent(tn, informationContext.getTaskInformation(tn));
+				}
+			} else {
+				//add suggestions for tasks that don't start with, but contain the keyword
+				//but add them after the start with ones
+				List<TaskName> containsnames = new ArrayList<>();
+				for (TaskName tn : tasknames) {
+					String tasknamestr = tn.getName();
+					if (tasknamestr.startsWith(tasknamekeyword)) {
+						tn = getTaskNameWithoutVersionQualifiers(tn);
+						result.putIfAbsent(tn, informationContext.getTaskInformation(tn));
+					} else if (tasknamestr.contains(tasknamekeyword)) {
+						containsnames.add(tn);
+					}
+				}
+				for (TaskName tn : containsnames) {
 					tn = getTaskNameWithoutVersionQualifiers(tn);
 					result.putIfAbsent(tn, informationContext.getTaskInformation(tn));
 				}
@@ -95,28 +114,108 @@ public class ReflectionExternalScriptInformationProvider implements ExternalScri
 		return ExternalScriptInformationProvider.super.getTaskParameterInformation(taskname, parametername);
 	}
 
+	private static boolean isBundleIdentifierTypeContext(TypeInformation typecontext,
+			Set<TypeInformation> checkedtypes) {
+		if (typecontext == null || !checkedtypes.add(typecontext)) {
+			return false;
+		}
+
+		if (ReflectionInformationContext.BUNDLEIDENTIFIER_CANONICAL_NAME.equals(typecontext.getTypeQualifiedName())) {
+			return true;
+		}
+		Set<TypeInformation> relatedtypes = typecontext.getRelatedTypes();
+		if (!ObjectUtils.isNullOrEmpty(relatedtypes)) {
+			for (TypeInformation rtype : relatedtypes) {
+				if (isBundleIdentifierTypeContext(rtype)) {
+					return true;
+				}
+			}
+		}
+		Set<TypeInformation> supertypes = typecontext.getSuperTypes();
+		if (!ObjectUtils.isNullOrEmpty(supertypes)) {
+			for (TypeInformation stype : supertypes) {
+				if (isBundleIdentifierTypeContext(stype)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	private static boolean isBundleIdentifierTypeContext(TypeInformation typecontext) {
+		if (typecontext == null) {
+			return false;
+		}
+		return isBundleIdentifierTypeContext(typecontext, new HashSet<>());
+	}
+
 	@Override
 	public Collection<? extends LiteralInformation> getLiterals(String literalkeyword, TypeInformation typecontext) {
-		if (typecontext == null) {
-			//can't really provide literals for unknown type
-			return Collections.emptySet();
-		}
-		String qualifiedtypecontextname = typecontext.getTypeQualifiedName();
-		if (ReflectionInformationContext.BUNDLEIDENTIFIER_CANONICAL_NAME.equals(qualifiedtypecontextname)) {
+		if (isBundleIdentifierTypeContext(typecontext)) {
 			//XXX try parse the keyword and semantically match the bundle ids
 			NavigableSet<BundleIdentifier> bundles = repository.getPresentBundlesForInformationProvider();
-			Collection<LiteralInformation> result = new ArrayList<>();
+			Collection<LiteralInformation> result = new LinkedHashSet<>();
 			if (literalkeyword == null) {
 				literalkeyword = "";
 			}
-			for (BundleIdentifier bundleid : bundles) {
-				if (!bundleid.toString().startsWith(literalkeyword)) {
-					continue;
+			if (!ObjectUtils.isNullOrEmpty(bundles)) {
+				//XXX provide more information about each bundle?
+
+				//add suggestions for bundles that don't start with, but contain the keyword
+				//but add them after the start with ones
+				LinkedHashSet<BundleIdentifier> bundlestoadd = new LinkedHashSet<>();
+				List<BundleIdentifier> containsbundleids = new ArrayList<>();
+				for (BundleIdentifier bundleid : bundles) {
+					String bundleidstr = bundleid.toString();
+					if (!bundleidstr.startsWith(literalkeyword)) {
+						if (bundleidstr.contains(literalkeyword)) {
+							containsbundleids.add(bundleid);
+						}
+						continue;
+					}
+					bundlestoadd.add(bundleid.withoutAnyQualifiers());
+					bundlestoadd.add(bundleid.withoutMetaQualifiers());
+					bundlestoadd.add(bundleid);
 				}
-				//XXX provide more information about the bundle
-				result.add(informationContext.getBundleLiteralInformation(bundleid.withoutAnyQualifiers()));
-				result.add(informationContext.getBundleLiteralInformation(bundleid.withoutMetaQualifiers()));
-				result.add(informationContext.getBundleLiteralInformation(bundleid));
+				for (BundleIdentifier bundleid : containsbundleids) {
+					bundlestoadd.add(bundleid.withoutAnyQualifiers());
+					bundlestoadd.add(bundleid.withoutMetaQualifiers());
+					bundlestoadd.add(bundleid);
+				}
+				BundleIdentifier[] bundlestoaddarray = bundlestoadd.toArray(EMPTY_BUNDLEIDENTIFIER_ARRAY);
+				Arrays.sort(bundlestoaddarray, (l, r) -> {
+					//order:
+					//first the ones that don't have ANY qualifiers
+					//then the ones that don't have meta qualifiers
+					//then the meta qualified ones
+					if (!l.hasAnyQualifiers()) {
+						if (!r.hasAnyQualifiers()) {
+							return 0;
+						}
+						return -1;
+					}
+					if (!r.hasAnyQualifiers()) {
+						return 1;
+					}
+					//both has qualifiers
+					if (!l.hasMetaQualifiers()) {
+						if (!r.hasMetaQualifiers()) {
+							return 0;
+						}
+						return -1;
+					}
+					if (!r.hasMetaQualifiers()) {
+						return 1;
+					}
+					//both have meta qualifiers
+					return 0;
+				});
+
+				for (BundleIdentifier bundleid : bundlestoaddarray) {
+					if (bundleid.toString().contains(literalkeyword)) {
+						result.add(informationContext.getBundleLiteralInformation(bundleid));
+					}
+				}
 			}
 			return result;
 		}
