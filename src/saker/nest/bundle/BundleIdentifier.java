@@ -268,7 +268,7 @@ public final class BundleIdentifier implements Comparable<BundleIdentifier>, Ext
 	 * This method is the same as the following:
 	 * 
 	 * <pre>
-	 * !hasNormalQualifiers() && !hasMetaQualifiers()
+	 * !hasNormalQualifiers() &amp;&amp; !hasMetaQualifiers()
 	 * </pre>
 	 * 
 	 * @return <code>true</code> if there are any qualifiers present.

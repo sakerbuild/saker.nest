@@ -227,8 +227,7 @@ public class ReflectionExternalScriptInformationProvider implements ExternalScri
 		if (literal == null) {
 			return null;
 		}
-		String qualifiedtypecontextname = typecontext == null ? null : typecontext.getTypeQualifiedName();
-		if (ReflectionInformationContext.BUNDLEIDENTIFIER_CANONICAL_NAME.equals(qualifiedtypecontextname)) {
+		if (isBundleIdentifierTypeContext(typecontext)) {
 			try {
 				BundleIdentifier bundleid = BundleIdentifier.valueOf(literal);
 				//XXX more info about the found bundle?
