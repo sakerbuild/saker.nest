@@ -152,14 +152,14 @@ public class DependencyUtils {
 			BiFunction<? super BK, ? super BC, ? extends BundleDependencyInformation> bundledependencieslookupfunction,
 			DependencyResolutionLogger<? super BC> logger)
 			throws NullPointerException, IllegalArgumentException, UnsupportedOperationException {
-		if (((querySpecialDependendyFlags(basedependencyinfo) & SPECIAL_PRIVATE) == SPECIAL_PRIVATE)) {
+		if (((querySpecialDependencyFlags(basedependencyinfo) & SPECIAL_PRIVATE) == SPECIAL_PRIVATE)) {
 			throw new UnsupportedOperationException(
 					"Private dependencies are not supported in this version: " + Versions.VERSION_STRING_FULL);
 		}
 		DependencyDomainResolutionResult<BK, BC> satisfied = satisfyDependencyDomain(basebundle, basebundlecontext,
 				basedependencyinfo, bundleslookupfunction, (t, u) -> {
 					BundleDependencyInformation r = bundledependencieslookupfunction.apply(t, u);
-					if (r != null && ((querySpecialDependendyFlags(r) & SPECIAL_PRIVATE) == SPECIAL_PRIVATE)) {
+					if (r != null && ((querySpecialDependencyFlags(r) & SPECIAL_PRIVATE) == SPECIAL_PRIVATE)) {
 						throw new UnsupportedOperationException(
 								"Private dependencies are not supported in this version: "
 										+ Versions.VERSION_STRING_FULL);
@@ -269,7 +269,7 @@ public class DependencyUtils {
 
 		Entry<? extends BK, ? extends BC> basebundleentry = ImmutableUtils.makeImmutableMapEntry(basebundle,
 				basebundlecontext);
-		int basespeciality = querySpecialDependendyFlags(basedependencyinfo);
+		int basespeciality = querySpecialDependencyFlags(basedependencyinfo);
 		if (((basespeciality & SPECIAL_OPTIONAL) == SPECIAL_OPTIONAL)) {
 			optionalhavingbundles.put(basebundle, basedependencyinfo);
 		}
@@ -300,7 +300,7 @@ public class DependencyUtils {
 						return null;
 					}
 
-					int depspeciality = querySpecialDependendyFlags(depinfos);
+					int depspeciality = querySpecialDependencyFlags(depinfos);
 					if (((depspeciality & SPECIAL_OPTIONAL) == SPECIAL_OPTIONAL)) {
 						optionalhavingbundles.put(kentry, depinfos);
 					}
@@ -814,7 +814,7 @@ public class DependencyUtils {
 	private static final int SPECIAL_PRIVATE = 1 << 2;
 	private static final int SPECIAL_ALL = SPECIAL_OPTIONAL | SPECIAL_PRIVATE;
 
-	private static int querySpecialDependendyFlags(BundleDependencyInformation deps) {
+	private static int querySpecialDependencyFlags(BundleDependencyInformation deps) {
 		int result = 0;
 		for (BundleDependencyList dlist : deps.getDependencies().values()) {
 			for (BundleDependency d : dlist.getDependencies()) {
@@ -847,18 +847,49 @@ public class DependencyUtils {
 		return deps.filter((bi, deplist) -> deplist.filter(d -> d.isOptional() ? null : d));
 	}
 
-	private static <BK extends BundleIdentifierHolder, BC> boolean satisfy(DependencyResolutionState<BK, BC> state,
+	private static <BK extends BundleIdentifierHolder, BC> boolean satisfy(DependencyResolutionState<BK, BC> deprs,
 			BiFunction<? super BundleIdentifier, ? super BC, ? extends Iterable<? extends Entry<? extends BK, ? extends BC>>> bundleslookupfunction,
 			BiFunction<? super BK, ? super BC, ? extends BundleDependencyInformation> bundledependencieslookupfunction,
 			DomainResult<BK, BC> domain, DependencyResolutionLogger<? super BC> logger,
 			Map<PrivateScopeDependencyRoot<? extends BK, ? extends BC>, Optional<DomainResult<BK, BC>>> privatescopedomains,
 			boolean privatescope, BundleDependencyList deplist) {
 		if (logger != null) {
-			logger.enter(state.versionlessBundleId.getKey(), state.versionlessBundleId.getValue());
+			logger.enter(deprs.versionlessBundleIdentifier, deprs.referringBundleContext);
 		}
 
 		BundleResolutionState<BK, BC> bundleresolutionstate;
-		while ((bundleresolutionstate = state.nextBundle()) != null) {
+		while ((bundleresolutionstate = deprs.nextBundle()) != null) {
+			Entry<BundleIdentifier, ? extends BC> versionlessbundleresstatebundleentry = versionlessBundleEntry(
+					bundleresolutionstate.bundleEntry);
+
+			domain.unpinBacktrack(versionlessbundleresstatebundleentry);
+			DomainResult<BK, BC> presentbundledomain;
+			if (privatescope) {
+				presentbundledomain = domain.getPrivatePinned(versionlessbundleresstatebundleentry);
+			} else {
+				presentbundledomain = domain.getPinned(versionlessbundleresstatebundleentry);
+			}
+			if (presentbundledomain != null) {
+				Entry<? extends BK, ? extends BC> presentbundle = presentbundledomain.bundleEntry;
+				String version = presentbundle.getKey().getBundleIdentifier().getVersionNumber();
+				for (BundleDependency bdep : deplist.getDependencies()) {
+					VersionRange range = bdep.getRange();
+					if (!range.includes(version)) {
+						if (logger != null) {
+							logger.dependencyVersionRangeMismatchForPinnedBundle(bdep,
+									presentbundle.getKey().getBundleIdentifier(), presentbundle.getValue());
+						}
+						return false;
+					}
+				}
+				domain.pinDirectDependency(presentbundledomain);
+				if (logger != null) {
+					logger.dependencyFoundPinned(deprs.versionlessBundleIdentifier, deprs.referringBundleContext,
+							presentbundle.getKey().getBundleIdentifier(), presentbundle.getValue());
+				}
+				return true;
+			}
+
 			DomainResult<BK, BC> usedomain;
 			PrivateScopeDependencyRoot<BK, BC> privscope = null;
 			if (privatescope) {
@@ -870,12 +901,12 @@ public class DependencyUtils {
 					if (presentpriv != null) {
 						DomainResult<BK, BC> privdomain = presentpriv.orElse(null);
 						if (privdomain != null) {
-							domain.pinDirectDependency(state.versionlessBundleId, privdomain);
+							domain.pinDirectDependency(privdomain);
 						} else {
 							bundleresolutionstate.startBackTrack();
 						}
 						if (logger != null) {
-							logger.exit(state.versionlessBundleId.getKey(), state.versionlessBundleId.getValue(),
+							logger.exit(deprs.versionlessBundleIdentifier, deprs.referringBundleContext,
 									bundleresolutionstate.getBundleKey().getBundleIdentifier(),
 									bundleresolutionstate.getBundleContext());
 						}
@@ -888,26 +919,25 @@ public class DependencyUtils {
 			} else {
 				usedomain = DomainResult.newSubDomain(domain, bundleresolutionstate.bundleEntry);
 			}
-			domain.pinDirectDependency(state.versionlessBundleId, usedomain);
+			domain.pinDirectDependency(usedomain);
 
 			satisfyBundleVersion(bundleslookupfunction, bundledependencieslookupfunction, usedomain, logger,
 					bundleresolutionstate, privatescopedomains);
-			domain.getPinned(state.versionlessBundleId);
 			//satisfied the bundle, if we're no longer backtracking
 			if (!bundleresolutionstate.isBackTracking()) {
 				if (logger != null) {
-					logger.exit(state.versionlessBundleId.getKey(), state.versionlessBundleId.getValue(),
+					logger.exit(deprs.versionlessBundleIdentifier, deprs.referringBundleContext,
 							bundleresolutionstate.getBundleKey().getBundleIdentifier(),
 							bundleresolutionstate.getBundleContext());
 				}
 				//store the state so if we need to backtract, we can continue from here
-				state.storeState(bundleresolutionstate);
+				deprs.storeState(bundleresolutionstate);
 				return true;
 			}
-			domain.unpinDirectDependency(state.versionlessBundleId, usedomain);
+			domain.unpinDirectDependency(usedomain);
 		}
 		if (logger != null) {
-			logger.exit(state.versionlessBundleId.getKey(), state.versionlessBundleId.getValue(), null, null);
+			logger.exit(deprs.versionlessBundleIdentifier, deprs.referringBundleContext, null, null);
 		}
 		return false;
 	}
@@ -923,41 +953,11 @@ public class DependencyUtils {
 					bundleresolutionstate.getBundleContext());
 		}
 		DependencyResolutionState<BK, BC> deprs;
-		bundle_resolver:
 		while ((deprs = bundleresolutionstate.next(bundleslookupfunction, bundledependencieslookupfunction)) != null) {
-			domain.unpinBacktrack(deprs.versionlessBundleId);
 
 			BundleDependencyList deplist = bundleresolutionstate.dependencyInfo
-					.getDependencyList(deprs.versionlessBundleId.getKey());
+					.getDependencyList(deprs.versionlessBundleIdentifier);
 			boolean privatescope = ConfiguredRepositoryStorage.isAllPrivateDependencies(deplist);
-			DomainResult<BK, BC> presentbundledomain;
-			if (privatescope) {
-				presentbundledomain = domain.getPrivatePinned(deprs.versionlessBundleId);
-			} else {
-				presentbundledomain = domain.getPinned(deprs.versionlessBundleId);
-			}
-			if (presentbundledomain != null) {
-				Entry<? extends BK, ? extends BC> presentbundle = presentbundledomain.bundleEntry;
-				String version = presentbundle.getKey().getBundleIdentifier().getVersionNumber();
-				for (BundleDependency bdep : deplist.getDependencies()) {
-					VersionRange range = bdep.getRange();
-					if (!range.includes(version)) {
-						if (logger != null) {
-							logger.dependencyVersionRangeMismatchForPinnedBundle(bdep,
-									presentbundle.getKey().getBundleIdentifier(), presentbundle.getValue());
-						}
-						bundleresolutionstate.startBackTrack();
-						continue bundle_resolver;
-					}
-				}
-				domain.pinDirectDependency(deprs.versionlessBundleId, presentbundledomain);
-				if (logger != null) {
-					logger.dependencyFoundPinned(deprs.versionlessBundleId.getKey(),
-							deprs.versionlessBundleId.getValue(), presentbundle.getKey().getBundleIdentifier(),
-							presentbundle.getValue());
-				}
-				continue bundle_resolver;
-			}
 
 			boolean satisfied = satisfy(deprs, bundleslookupfunction, bundledependencieslookupfunction, domain, logger,
 					privatescopedomains, privatescope, deplist);
@@ -1062,8 +1062,7 @@ public class DependencyUtils {
 			if (!result.add(bundleEntry)) {
 				return;
 			}
-			for (Entry<Entry<? extends BK, ? extends BC>, DomainResult<BK, BC>> entry : directDependencies.entrySet()) {
-				DomainResult<BK, BC> domainres = entry.getValue();
+			for (DomainResult<BK, BC> domainres : directDependencies.values()) {
 				if (!includeprivates && domainres.privateParent) {
 					continue;
 				}
@@ -1128,21 +1127,22 @@ public class DependencyUtils {
 			return findPinned(versionlessBundleId, new HashSet<>(), false);
 		}
 
-		public void pinDirectDependency(Entry<? extends BundleIdentifier, ? extends BC> versionlessBundleId,
-				DomainResult<BK, BC> domain) {
+		public void pinDirectDependency(DomainResult<BK, BC> domain) {
+			Entry<? extends BundleIdentifier, ? extends BC> versionlessbundleid = versionlessBundleEntry(
+					domain.bundleEntry);
 			DomainResult<BK, BC> prev = this.directDependencies.put(domain.bundleEntry, domain);
 			if (prev != null) {
 				if (prev == domain) {
 					return;
 				}
 				throw new AssertionError(
-						"Already present: " + versionlessBundleId + " - " + prev + " against " + domain);
+						"Already present: " + versionlessbundleid + " - " + prev + " against " + domain);
 			}
-			Entry<? extends BK, ? extends BC> pprev = this.dependencyVersionlessLookup.put(versionlessBundleId,
+			Entry<? extends BK, ? extends BC> pprev = this.dependencyVersionlessLookup.put(versionlessbundleid,
 					domain.bundleEntry);
 			if (pprev != null) {
 				throw new AssertionError(
-						"Already present: " + versionlessBundleId + " - " + pprev + " against " + domain);
+						"Already present: " + versionlessbundleid + " - " + pprev + " against " + domain);
 			}
 		}
 
@@ -1154,21 +1154,17 @@ public class DependencyUtils {
 			this.directDependencies.remove(pinned);
 		}
 
-		public void unpinDirectDependency(Entry<? extends BundleIdentifier, ? extends BC> versionlessBundleId,
-				DomainResult<BK, BC> domain) {
-			if (TestFlag.ENABLED) {
-				if (!versionlessBundleEntry(domain.bundleEntry).equals(versionlessBundleId)) {
-					throw new AssertionError("mismatch " + domain.bundleEntry + " - " + versionlessBundleId);
-				}
-			}
-			boolean removed = this.dependencyVersionlessLookup.remove(versionlessBundleId, domain.bundleEntry);
+		public void unpinDirectDependency(DomainResult<BK, BC> domain) {
+			Entry<? extends BundleIdentifier, ? extends BC> versionlessbundleid = versionlessBundleEntry(
+					domain.bundleEntry);
+			boolean removed = this.dependencyVersionlessLookup.remove(versionlessbundleid, domain.bundleEntry);
 			if (!removed) {
-				throw new AssertionError("Failed to unpin: " + versionlessBundleId + " with " + domain + ". present: "
-						+ this.dependencyVersionlessLookup.get(versionlessBundleId));
+				throw new AssertionError("Failed to unpin: " + versionlessbundleid + " with " + domain + ". present: "
+						+ this.dependencyVersionlessLookup.get(versionlessbundleid));
 			}
 			removed = this.directDependencies.remove(domain.bundleEntry, domain);
 			if (!removed) {
-				throw new AssertionError("Failed to unpin: " + versionlessBundleId + " with " + domain + ". present: "
+				throw new AssertionError("Failed to unpin: " + versionlessbundleid + " with " + domain + ". present: "
 						+ this.directDependencies.get(domain.bundleEntry));
 			}
 		}
@@ -1242,11 +1238,10 @@ public class DependencyUtils {
 					//sanity check
 					continue;
 				}
-				BundleIdentifier withouversionbi = depentry.getKey();
+				BundleIdentifier withoutversionbi = depentry.getKey();
 				BC bundlecontext = getBundleContext();
-				DependencyResolutionState<BK, BC> result = new DependencyResolutionState<>(
-						ImmutableUtils.makeImmutableMapEntry(withouversionbi, bundlecontext),
-						bundleslookupfunction.apply(withouversionbi, bundlecontext), deplist,
+				DependencyResolutionState<BK, BC> result = new DependencyResolutionState<>(withoutversionbi,
+						bundlecontext, bundleslookupfunction.apply(withoutversionbi, bundlecontext), deplist,
 						bundledependencieslookupfunction, logger);
 				resolutionStateBacktrack.add(result);
 				return result;
@@ -1293,7 +1288,8 @@ public class DependencyUtils {
 
 	private static final class DependencyResolutionState<BK extends BundleIdentifierHolder, BC> {
 		//versionless bundle id
-		protected final Entry<? extends BundleIdentifier, ? extends BC> versionlessBundleId;
+		protected final BundleIdentifier versionlessBundleIdentifier;
+		protected final BC referringBundleContext;
 
 		//iterates over the looked up bundles
 		protected ListIterator<? extends Entry<? extends BK, ? extends BC>> bundleIt;
@@ -1306,11 +1302,13 @@ public class DependencyUtils {
 
 		private BundleResolutionState<BK, BC> storedState;
 
-		public DependencyResolutionState(Entry<? extends BundleIdentifier, ? extends BC> bundleId,
+		public DependencyResolutionState(BundleIdentifier versionlessBundleId, BC referringBundleContext,
+//				Entry<? extends BundleIdentifier, ? extends BC> bundleId,
 				Iterable<? extends Entry<? extends BK, ? extends BC>> lookedupbundles, BundleDependencyList deplist,
 				BiFunction<? super BK, ? super BC, ? extends BundleDependencyInformation> bundledependencieslookupfunction,
 				DependencyResolutionLogger<? super BC> logger) {
-			this.versionlessBundleId = bundleId;
+			this.versionlessBundleIdentifier = versionlessBundleId;
+			this.referringBundleContext = referringBundleContext;
 			this.lookedupBundles = ImmutableUtils.makeImmutableList(lookedupbundles);
 			this.dependencyList = deplist;
 			this.bundleDependenciesLookupFunction = bundledependencieslookupfunction;
@@ -1365,7 +1363,7 @@ public class DependencyUtils {
 
 		@Override
 		public String toString() {
-			return getClass().getSimpleName() + "[" + versionlessBundleId + "]";
+			return getClass().getSimpleName() + "[" + versionlessBundleIdentifier + "]";
 		}
 	}
 
