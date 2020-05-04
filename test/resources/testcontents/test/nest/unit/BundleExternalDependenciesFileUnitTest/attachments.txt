@@ -1,0 +1,3 @@
+https://example.com/myjar.jar
+	source-attachment:   https://example.com/myjar-sources.jar  
+	documentation-attachment:   https://example.com/myjar-doc.jar  

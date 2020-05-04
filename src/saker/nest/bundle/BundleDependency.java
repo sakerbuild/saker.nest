@@ -101,7 +101,7 @@ public final class BundleDependency implements Externalizable {
 	}
 
 	/**
-	 * Gets the meta-data entroes of this bundle dependency.
+	 * Gets the meta-data entries of this bundle dependency.
 	 * 
 	 * @return An unmodifiable set of meta-data entries.
 	 */

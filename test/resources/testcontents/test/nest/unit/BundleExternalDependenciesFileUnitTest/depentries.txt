@@ -1,0 +1,6 @@
+https://example.com/myjar.jar
+	classpath
+		entries: lib/*.jar
+https://example.com/myjar2.jar
+	classpath
+		entries: ;;lib/*.jar;;;second/*.jar;;

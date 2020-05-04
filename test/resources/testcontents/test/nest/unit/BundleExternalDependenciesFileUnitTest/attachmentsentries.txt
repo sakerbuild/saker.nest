@@ -1,0 +1,5 @@
+https://example.com/myjar.jar
+	source-attachment: https://example.com/myjar-sources.jar
+		entries: lib/*.jar
+	documentation-attachment: https://example.com/myjar-doc.jar
+		entries: ;;lib/*.jar;;;second/*.jar;;

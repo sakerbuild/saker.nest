@@ -1,0 +1,7 @@
+
+https://example.com/myjar.jar  
+	classpath
+	
+https://example.com/myjar2.jar  
+	classpath, test, compile
+	
