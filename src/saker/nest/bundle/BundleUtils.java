@@ -15,15 +15,69 @@
  */
 package saker.nest.bundle;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.nio.channels.SeekableByteChannel;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.Enumeration;
 import java.util.NavigableSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
+import java.util.zip.ZipEntry;
 
 import saker.build.task.TaskName;
+import saker.build.thirdparty.saker.util.ImmutableUtils;
 import saker.build.thirdparty.saker.util.ObjectUtils;
+import saker.build.thirdparty.saker.util.classloader.MultiClassLoader;
+import saker.build.thirdparty.saker.util.io.ByteArrayRegion;
+import saker.build.thirdparty.saker.util.io.UnsyncByteArrayOutputStream;
+import saker.build.util.java.JavaTools;
 
 public class BundleUtils {
+	private static final Set<OpenOption> OPEN_OPTIONS_READ_WITHOUT_SHARING;
+	static {
+		Set<OpenOption> withoutsharing;
+		try {
+			Class<?> exooclass = Class.forName("com.sun.nio.file.ExtendedOpenOption");
+			@SuppressWarnings({ "unchecked", "rawtypes" })
+			OpenOption nosharewrite = (OpenOption) Enum.valueOf((Class) exooclass, "NOSHARE_WRITE");
+			@SuppressWarnings({ "unchecked", "rawtypes" })
+			OpenOption nosharedelete = (OpenOption) Enum.valueOf((Class) exooclass, "NOSHARE_DELETE");
+			withoutsharing = ImmutableUtils
+					.makeImmutableHashSet(new OpenOption[] { StandardOpenOption.READ, nosharewrite, nosharedelete });
+		} catch (ClassNotFoundException | IllegalArgumentException | ClassCastException e) {
+			//the enumerations somewhy couldn't be found
+			withoutsharing = null;
+		}
+		OPEN_OPTIONS_READ_WITHOUT_SHARING = withoutsharing;
+	}
+	private static final ClassLoader REPOSITORY_CLASSPATH_CLASSLOADER = NestRepositoryBundleClassLoader.class
+			.getClassLoader();
+
+	public static SeekableByteChannel openExclusiveChannelForJar(Path bundlejar) throws IOException {
+		if (OPEN_OPTIONS_READ_WITHOUT_SHARING != null) {
+			try {
+				return Files.newByteChannel(bundlejar, OPEN_OPTIONS_READ_WITHOUT_SHARING);
+			} catch (UnsupportedOperationException e) {
+				//not supported on mac or linux (ubuntu)
+				//  we fall back to simply opening the file as it makes no sense to fail by default
+				//XXX support exclusive read access to the file on mac and linux
+				//    if there's no OS support for exclusive access, then we could read the JAR contents into
+				//    memory and work with that to protect external malicious modifications. However, this
+				//    may require significant memory usage for large bundles.
+			}
+		}
+		return Files.newByteChannel(bundlejar, StandardOpenOption.READ);
+	}
+
 	public static BundleIdentifier requireVersioned(BundleIdentifier bundleid) {
 		Objects.requireNonNull(bundleid, "bundle id");
 		if (bundleid.getVersionQualifier() == null) {
@@ -98,7 +152,62 @@ public class BundleUtils {
 		return result.resolve(bundleid.toString() + ".jar");
 	}
 
+	public static NavigableSet<String> getJarEntryNames(JarFile jar) {
+		NavigableSet<String> result = new TreeSet<>();
+		Enumeration<JarEntry> entries = jar.entries();
+		while (entries.hasMoreElements()) {
+			JarEntry jarentry = entries.nextElement();
+			if (!jarentry.isDirectory()) {
+				result.add(jarentry.getName());
+			}
+		}
+		return ImmutableUtils.makeImmutableNavigableSet(result);
+	}
+
+	public static ByteArrayRegion getJarEntryBytes(JarFile jarfile, String name)
+			throws NoSuchFileException, IOException {
+		Objects.requireNonNull(jarfile, "archive file");
+		Objects.requireNonNull(name, "name");
+		ZipEntry je = jarfile.getEntry(name);
+		if (je == null) {
+			throw new NoSuchFileException(name, null, "Archive entry not found in: " + jarfile.getName());
+		}
+		long entrysize = je.getSize();
+		try (UnsyncByteArrayOutputStream baos = new UnsyncByteArrayOutputStream(entrysize < 0 ? 4096 : (int) entrysize);
+				InputStream is = jarfile.getInputStream(je)) {
+			baos.readFrom(is);
+			return baos.toByteArrayRegion();
+		}
+	}
+
+	public static InputStream openJarEntry(JarFile jarfile, String name) throws NoSuchFileException, IOException {
+		Objects.requireNonNull(jarfile, "archive file");
+		Objects.requireNonNull(name, "name");
+		ZipEntry je = jarfile.getEntry(name);
+		if (je == null) {
+			throw new NoSuchFileException(name, null, "Archive entry not found in: " + jarfile.getName());
+		}
+		return jarfile.getInputStream(je);
+	}
+
 	private BundleUtils() {
 		throw new UnsupportedOperationException();
 	}
+
+	public static ClassLoader createAppropriateParentClassLoader(NestRepositoryBundle bundle) {
+		return createAppropriateParentClassLoader(bundle.getInformation());
+	}
+
+	public static ClassLoader createAppropriateParentClassLoader(BundleInformation info) {
+		if (!info.isJdkToolsDependent()) {
+			return REPOSITORY_CLASSPATH_CLASSLOADER;
+		}
+		try {
+			return MultiClassLoader.create(ImmutableUtils.asUnmodifiableArrayList(JavaTools.getJDKToolsClassLoader(),
+					REPOSITORY_CLASSPATH_CLASSLOADER));
+		} catch (IOException e) {
+			throw new UncheckedIOException("Failed to create JDK tools class loader.", e);
+		}
+	}
+
 }

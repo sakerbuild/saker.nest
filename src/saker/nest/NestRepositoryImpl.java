@@ -25,6 +25,7 @@ import java.util.Map.Entry;
 import java.util.UUID;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListMap;
 
 import saker.build.runtime.repository.BuildRepository;
 import saker.build.runtime.repository.RepositoryBuildEnvironment;
@@ -38,6 +39,7 @@ import saker.build.thirdparty.saker.util.function.Functionals;
 import saker.build.thirdparty.saker.util.io.FileUtils;
 import saker.build.thirdparty.saker.util.io.IOUtils;
 import saker.build.thirdparty.saker.util.io.SerialUtils;
+import saker.nest.bundle.AbstractExternalArchive;
 import saker.nest.bundle.storage.AbstractBundleStorage;
 import saker.nest.bundle.storage.AbstractStorageKey;
 import saker.nest.meta.Versions;
@@ -53,6 +55,9 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 
 	private final Map<AbstractStorageKey, Object> storageLoadLocks = Collections.synchronizedMap(new WeakHashMap<>());
 	private final Map<AbstractStorageKey, AbstractBundleStorage> loadedStorages = new ConcurrentHashMap<>();
+
+	final ConcurrentSkipListMap<Path, Object> externalArchiveLoadLocks = new ConcurrentSkipListMap<>();
+	final ConcurrentSkipListMap<Path, AbstractExternalArchive> externalArchives = new ConcurrentSkipListMap<>();
 
 	public NestRepositoryImpl(RepositoryEnvironment environment) {
 		this.repositoryEnvironment = environment;
@@ -150,6 +155,11 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 			exc = IOUtils.closeExc(exc, loadedStorages.values());
 		}
 		loadedStorages.clear();
+		for (Entry<Path, Object> lockentry : externalArchiveLoadLocks.entrySet()) {
+			synchronized (lockentry.getValue()) {
+				exc = IOUtils.closeExc(exc, externalArchives.remove(lockentry.getKey()));
+			}
+		}
 
 		IOUtils.throwExc(exc);
 	}

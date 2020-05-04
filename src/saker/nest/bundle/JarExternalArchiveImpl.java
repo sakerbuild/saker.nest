@@ -17,6 +17,7 @@ package saker.nest.bundle;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -31,25 +32,28 @@ import saker.build.thirdparty.saker.util.io.ByteArrayRegion;
 import saker.build.thirdparty.saker.util.io.IOUtils;
 import saker.build.thirdparty.saker.util.io.JarFileUtils;
 import saker.build.thirdparty.saker.util.io.SerialUtils;
-import saker.nest.bundle.storage.AbstractBundleStorage;
 
-public class JarNestRepositoryBundleImpl extends AbstractNestRepositoryBundle implements JarNestRepositoryBundle {
-	public static final String BUNDLE_HASH_ALGORITHM = "MD5";
-
+public class JarExternalArchiveImpl extends AbstractExternalArchive {
+	private final URI origin;
 	private final SeekableByteChannel channel;
 	private final JarFile jar;
-	private final BundleInformation information;
-	private final AbstractBundleStorage storage;
-
 	private final LazySupplier<NavigableSet<String>> entryNames;
+
 	private final LazySupplier<byte[]> jarHash = LazySupplier.of(this::computeJarHash);
 
-	public static JarNestRepositoryBundleImpl create(AbstractBundleStorage storage, Path bundlejar) throws IOException {
-		SeekableByteChannel channel = BundleUtils.openExclusiveChannelForJar(bundlejar);
+	private JarExternalArchiveImpl(URI origin, SeekableByteChannel channel, JarFile jar) {
+		this.origin = origin;
+		this.channel = channel;
+		this.jar = jar;
+		this.entryNames = LazySupplier.of(() -> BundleUtils.getJarEntryNames(jar));
+	}
+
+	public static JarExternalArchiveImpl create(URI origin, Path jarpath) throws IOException {
+		SeekableByteChannel channel = BundleUtils.openExclusiveChannelForJar(jarpath);
 		try {
-			JarFile jarfile = JarFileUtils.createMultiReleaseJarFile(bundlejar);
+			JarFile jarfile = JarFileUtils.createMultiReleaseJarFile(jarpath);
 			try {
-				return new JarNestRepositoryBundleImpl(storage, jarfile, channel);
+				return new JarExternalArchiveImpl(origin, channel, jarfile);
 			} catch (Throwable e) {
 				IOUtils.addExc(e, IOUtils.closeExc(jarfile));
 				throw e;
@@ -58,32 +62,6 @@ public class JarNestRepositoryBundleImpl extends AbstractNestRepositoryBundle im
 			IOUtils.addExc(e, IOUtils.closeExc(channel));
 			throw e;
 		}
-	}
-
-	private JarNestRepositoryBundleImpl(AbstractBundleStorage storage, JarFile jar, SeekableByteChannel channel,
-			BundleInformation bundleinfo) {
-		this.channel = channel;
-		this.storage = storage;
-		this.jar = jar;
-		this.information = bundleinfo;
-		this.entryNames = LazySupplier.of(() -> BundleUtils.getJarEntryNames(jar));
-	}
-
-	private JarNestRepositoryBundleImpl(AbstractBundleStorage storage, JarFile jar, SeekableByteChannel channel)
-			throws IOException {
-		this(storage, jar, channel, new BundleInformation(jar));
-	}
-
-	/**
-	 * Gets the channel for the underlying JAR.
-	 * <p>
-	 * Callers should synchronize on <code>this</code> when accessing the channel.
-	 * 
-	 * @return The channel for the file or <code>null</code> if the implementation cannot ensure that the JAR is not
-	 *             modified after being opened.
-	 */
-	public SeekableByteChannel getChannel() {
-		return channel;
 	}
 
 	@Override
@@ -104,6 +82,11 @@ public class JarNestRepositoryBundleImpl extends AbstractNestRepositoryBundle im
 	}
 
 	@Override
+	public URI getOrigin() {
+		return origin;
+	}
+
+	@Override
 	public InputStream openEntry(String name) throws IOException {
 		return BundleUtils.openJarEntry(jar, name);
 	}
@@ -113,37 +96,10 @@ public class JarNestRepositoryBundleImpl extends AbstractNestRepositoryBundle im
 		return BundleUtils.getJarEntryBytes(jar, name);
 	}
 
-	@Override
-	public BundleInformation getInformation() {
-		return information;
-	}
-
-	@Override
-	public BundleIdentifier getBundleIdentifier() {
-		return information.getBundleIdentifier();
-	}
-
-	@Override
 	public Path getJarPath() {
 		return Paths.get(jar.getName());
 	}
 
-	@Override
-	public void close() throws IOException {
-		IOUtils.close(jar, channel);
-	}
-
-	@Override
-	public AbstractBundleStorage getStorage() {
-		return storage;
-	}
-
-	@Override
-	public Path getBundleStoragePath() {
-		return getStorage().getBundleStoragePath(this);
-	}
-
-	@Override
 	public byte[] getHash() {
 		return getSharedHash().clone();
 	}
@@ -154,8 +110,13 @@ public class JarNestRepositoryBundleImpl extends AbstractNestRepositoryBundle im
 	}
 
 	@Override
+	public void close() throws IOException {
+		IOUtils.close(jar, channel);
+	}
+
+	@Override
 	public String toString() {
-		return getClass().getSimpleName() + "[" + getBundleIdentifier() + " : " + jar.getName() + "]";
+		return getClass().getSimpleName() + "[" + getOrigin() + " : " + jar.getName() + "]";
 	}
 
 	private byte[] computeJarHash() {
@@ -175,10 +136,11 @@ public class JarNestRepositoryBundleImpl extends AbstractNestRepositoryBundle im
 
 	private static byte[] generateBundleHash(Path jarpath) throws IOException {
 		try {
-			return LocalFileProvider.getInstance().hash(jarpath, BUNDLE_HASH_ALGORITHM).getHash();
+			return LocalFileProvider.getInstance().hash(jarpath, JarNestRepositoryBundleImpl.BUNDLE_HASH_ALGORITHM)
+					.getHash();
 		} catch (NoSuchAlgorithmException e) {
-			throw new AssertionError("Hash algorithm not found: " + BUNDLE_HASH_ALGORITHM, e);
+			throw new AssertionError("Hash algorithm not found: " + JarNestRepositoryBundleImpl.BUNDLE_HASH_ALGORITHM,
+					e);
 		}
 	}
-
 }

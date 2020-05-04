@@ -18,7 +18,6 @@ package testing.saker.nest.util;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.security.KeyPair;
@@ -77,6 +76,10 @@ public class NestIntegrationTestUtils {
 		}
 	}
 
+	public static ByteArrayRegion createJarBytesWithClasses(Set<Class<?>> addclasses) throws IOException {
+		return createJarBytesFromDirectoryWithClasses(null, null, addclasses);
+	}
+
 	public static ByteArrayRegion createJarBytesFromDirectoryWithClasses(SakerFileProvider fp, SakerPath directory,
 			Set<Class<?>> addclasses) throws IOException {
 		StreamWritable sw = createStreamWritableJarFromDirectoryWithClasses(fp, directory, addclasses);
@@ -88,17 +91,19 @@ public class NestIntegrationTestUtils {
 
 	public static StreamWritable createStreamWritableJarFromDirectoryWithClasses(SakerFileProvider fp,
 			SakerPath directory, Set<Class<?>> addclasses) throws IOException {
-		NavigableMap<SakerPath, ? extends FileEntry> entries = fp.getDirectoryEntriesRecursively(directory);
+		NavigableMap<SakerPath, ? extends FileEntry> entries = fp == null ? new TreeMap<>()
+				: fp.getDirectoryEntriesRecursively(directory);
 		SakerPath manifestpath = SakerPath.valueOf(MANIFEST_PATH);
 		FileEntry manifest = entries.remove(manifestpath);
-		if (manifest == null) {
-			throw new NoSuchFileException(directory.resolve(manifestpath).toString(), null, "Manifest file not found.");
-		}
 		Manifest mf;
-		try (ByteSource fileinput = fp.openInput(directory.resolve(manifestpath));
-				InputStream manifestis = ByteSource.toInputStream(fileinput)) {
-			mf = new Manifest();
-			mf.read(manifestis);
+		if (manifest != null) {
+			try (ByteSource fileinput = fp.openInput(directory.resolve(manifestpath));
+					InputStream manifestis = ByteSource.toInputStream(fileinput)) {
+				mf = new Manifest();
+				mf.read(manifestis);
+			}
+		} else {
+			mf = null;
 		}
 		NavigableMap<String, Class<?>> classes;
 		if (ObjectUtils.isNullOrEmpty(addclasses)) {
@@ -114,11 +119,13 @@ public class NestIntegrationTestUtils {
 		}
 		return os -> {
 			try (JarOutputStream jaros = new JarOutputStream(StreamUtils.closeProtectedOutputStream(os))) {
-				ZipEntry manifestze = new ZipEntry(MANIFEST_PATH);
-				manifestze.setLastModifiedTime(DEFAULT_ENTRY_MODIFICATION_TIME);
-				jaros.putNextEntry(manifestze);
-				mf.write(jaros);
-				jaros.closeEntry();
+				if (mf != null) {
+					ZipEntry manifestze = new ZipEntry(MANIFEST_PATH);
+					manifestze.setLastModifiedTime(DEFAULT_ENTRY_MODIFICATION_TIME);
+					jaros.putNextEntry(manifestze);
+					mf.write(jaros);
+					jaros.closeEntry();
+				}
 
 				for (Entry<SakerPath, ? extends FileEntry> entry : entries.entrySet()) {
 					if (!entry.getValue().isRegularFile()) {
