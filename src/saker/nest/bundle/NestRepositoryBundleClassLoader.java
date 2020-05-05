@@ -83,6 +83,12 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 			return true;
 		}
 
+		@Override
+		public String toString() {
+			return "DependentClassLoader[" + (classLoader != null ? "classLoader=" + classLoader + ", " : "")
+					+ "privateScope=" + privateScope + "]";
+		}
+
 	}
 
 	static {
@@ -316,30 +322,32 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 
 	private Class<?> findExternalClassRecursively(Set<NestBundleClassLoader> triedcls, String name,
 			ClassNotFoundException e, boolean allowprivate) {
-		if (externalDependencyClassLoaders.isEmpty()) {
-			return null;
+		if (!externalDependencyClassLoaders.isEmpty()) {
+			for (DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader> depcl : externalDependencyClassLoaders) {
+				if (depcl.privateScope && !allowprivate) {
+					continue;
+				}
+				try {
+					return depcl.classLoader.loadClassFromArchive(name);
+				} catch (ClassNotFoundException e1) {
+					e.addSuppressed(e1);
+				}
+			}
 		}
-		for (DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader> depcl : externalDependencyClassLoaders) {
-			if (depcl.privateScope && !allowprivate) {
-				continue;
-			}
-			try {
-				return depcl.classLoader.loadClassFromArchive(name);
-			} catch (ClassNotFoundException e1) {
-				e.addSuppressed(e1);
-			}
-		}
-		for (DependentClassLoader<? extends NestRepositoryBundleClassLoader> depcl : dependencyClassLoaders.values()) {
-			if (depcl.privateScope && !allowprivate) {
-				continue;
-			}
-			NestRepositoryBundleClassLoader cl = depcl.classLoader;
-			if (!triedcls.add(cl)) {
-				continue;
-			}
-			Class<?> found = cl.findExternalClassRecursively(triedcls, name, e, false);
-			if (found != null) {
-				return found;
+		if (!dependencyClassLoaders.isEmpty()) {
+			for (DependentClassLoader<? extends NestRepositoryBundleClassLoader> depcl : dependencyClassLoaders
+					.values()) {
+				if (depcl.privateScope && !allowprivate) {
+					continue;
+				}
+				NestRepositoryBundleClassLoader cl = depcl.classLoader;
+				if (!triedcls.add(cl)) {
+					continue;
+				}
+				Class<?> found = cl.findExternalClassRecursively(triedcls, name, e, false);
+				if (found != null) {
+					return found;
+				}
 			}
 		}
 		return null;

@@ -100,7 +100,7 @@ public final class NestRepositoryExternalArchiveClassLoader extends MultiDataCla
 					continue;
 				}
 				try {
-					c = extcl.loadDefineClassFromArchive(name);
+					c = extcl.loadClassFromArchive(name);
 					if (c != null) {
 						break;
 					}

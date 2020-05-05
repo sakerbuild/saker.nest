@@ -32,19 +32,27 @@ import testing.saker.nest.TestFlag;
 import testing.saker.nest.util.NestIntegrationTestUtils;
 
 @SakerTest
-public class ExternalDepSimpleMainActionTest extends ManualLoadedRepositoryTestCase {
+public class MultiExternalDepSimpleMainActionTest extends ManualLoadedRepositoryTestCase {
 	//just a random uuid
-	private static final String PROPERTY_NAME = "c64803d1-ccc5-42fb-a4a2-9e8f41bda786";
+	private static final String PROPERTY_NAME = "39f8189c-8f24-4064-a817-d42bb05aa83c";
 
 	public static class SimpleMain {
 		public static void main(String[] args) {
-			ExternalClass.main(args);
+			System.setProperty(PROPERTY_NAME, ExternalFirst.hello() + ExternalSecond.hello());
 		}
 	}
 
-	public static class ExternalClass {
-		public static void main(String[] args) {
-			System.setProperty(PROPERTY_NAME, args[0]);
+	public static class ExternalFirst {
+		public static String hello() {
+			System.out.println(new ExternalSecond());
+			return "first";
+		}
+	}
+
+	public static class ExternalSecond {
+		public static String hello() {
+			System.out.println(new ExternalFirst());
+			return "second";
 		}
 	}
 
@@ -53,8 +61,10 @@ public class ExternalDepSimpleMainActionTest extends ManualLoadedRepositoryTestC
 	private ExternalArchiveResolvingNestMetric nm = new ExternalArchiveResolvingNestMetric();
 	{
 		try {
-			nm.put("https://example.com/external.jar",
-					NestIntegrationTestUtils.createJarBytesWithClasses(setOf(ExternalClass.class)));
+			nm.put("https://example.com/external_first.jar",
+					NestIntegrationTestUtils.createJarBytesWithClasses(setOf(ExternalFirst.class)));
+			nm.put("https://example.com/external_second.jar",
+					NestIntegrationTestUtils.createJarBytesWithClasses(setOf(ExternalSecond.class)));
 		} catch (Exception e) {
 			fail(e);
 		}
@@ -87,7 +97,7 @@ public class ExternalDepSimpleMainActionTest extends ManualLoadedRepositoryTestC
 		repo.executeAction("main", "-Unest.server.offline=true",
 				NestIntegrationTestUtils.createParameterBundlesUserParameter(bundleclasses.keySet(), bundleoutdir),
 				"-bundle", "simple.bundle-v1", "first-arg");
-		assertEquals(System.clearProperty(PROPERTY_NAME), "first-arg");
+		assertEquals(System.clearProperty(PROPERTY_NAME), "firstsecond");
 	}
 
 }

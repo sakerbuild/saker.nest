@@ -32,19 +32,26 @@ import testing.saker.nest.TestFlag;
 import testing.saker.nest.util.NestIntegrationTestUtils;
 
 @SakerTest
-public class ExternalDepSimpleMainActionTest extends ManualLoadedRepositoryTestCase {
+public class PublicExternalDepSimpleMainActionTest extends ManualLoadedRepositoryTestCase {
 	//just a random uuid
-	private static final String PROPERTY_NAME = "c64803d1-ccc5-42fb-a4a2-9e8f41bda786";
+	private static final String PROPERTY_NAME = "0c118b6b-042b-4b64-9d94-be22908d7fa1";
 
 	public static class SimpleMain {
 		public static void main(String[] args) {
-			ExternalClass.main(args);
+			System.out.println(new ExternalClass());
+			DepClass.main(args);
 		}
 	}
 
 	public static class ExternalClass {
 		public static void main(String[] args) {
 			System.setProperty(PROPERTY_NAME, args[0]);
+		}
+	}
+
+	public static class DepClass {
+		public static void main(String[] args) {
+			ExternalClass.main(args);
 		}
 	}
 
@@ -75,6 +82,7 @@ public class ExternalDepSimpleMainActionTest extends ManualLoadedRepositoryTestC
 	@Override
 	protected void runTestOnRepo(SakerRepository repo) throws Exception {
 		TreeMap<String, Set<Class<?>>> bundleclasses = TestUtils.<String, Set<Class<?>>>treeMapBuilder()//
+				.put("dep.bundle-v1", ObjectUtils.newHashSet(DepClass.class))//
 				.put("simple.bundle-v1", ObjectUtils.newHashSet(SimpleMain.class))//
 				.build();
 

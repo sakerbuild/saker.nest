@@ -1226,9 +1226,6 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 							//TODO filter based on constraints
 							//TODO check for multiple classpath kind occurrences, and make it non private if there is at least one non private
 
-							System.out.println(
-									"ConfiguredRepositoryStorage.createDomainClassLoaderLockedImpl() DEP: " + entry);
-
 							try {
 								AbstractExternalArchive extarchive = repository.externalArchives.get(archivepath);
 								if (extarchive == null) {
@@ -1295,8 +1292,6 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 						}
 					}
 				}
-				System.out
-						.println("ConfiguredRepositoryStorage.createDomainClassLoaderLockedImpl() " + extdependencies);
 			}
 			NestRepositoryBundleClassLoader constructedcl = new NestRepositoryBundleClassLoader(parentcl, this,
 					domain.bundle, domainbundle, dependencyclassloaders, relativebundlelookup,
