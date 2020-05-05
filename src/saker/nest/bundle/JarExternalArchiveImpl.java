@@ -34,26 +34,24 @@ import saker.build.thirdparty.saker.util.io.JarFileUtils;
 import saker.build.thirdparty.saker.util.io.SerialUtils;
 
 public class JarExternalArchiveImpl extends AbstractExternalArchive {
-	private final URI origin;
 	private final SeekableByteChannel channel;
 	private final JarFile jar;
 	private final LazySupplier<NavigableSet<String>> entryNames;
 
 	private final LazySupplier<byte[]> jarHash = LazySupplier.of(this::computeJarHash);
 
-	private JarExternalArchiveImpl(URI origin, SeekableByteChannel channel, JarFile jar) {
-		this.origin = origin;
+	private JarExternalArchiveImpl(SeekableByteChannel channel, JarFile jar) {
 		this.channel = channel;
 		this.jar = jar;
 		this.entryNames = LazySupplier.of(() -> BundleUtils.getJarEntryNames(jar));
 	}
 
-	public static JarExternalArchiveImpl create(URI origin, Path jarpath) throws IOException {
+	public static JarExternalArchiveImpl create(Path jarpath) throws IOException {
 		SeekableByteChannel channel = BundleUtils.openExclusiveChannelForJar(jarpath);
 		try {
 			JarFile jarfile = JarFileUtils.createMultiReleaseJarFile(jarpath);
 			try {
-				return new JarExternalArchiveImpl(origin, channel, jarfile);
+				return new JarExternalArchiveImpl(channel, jarfile);
 			} catch (Throwable e) {
 				IOUtils.addExc(e, IOUtils.closeExc(jarfile));
 				throw e;
@@ -79,11 +77,6 @@ public class JarExternalArchiveImpl extends AbstractExternalArchive {
 			return entries.contains(name);
 		}
 		return jar.getEntry(name) != null;
-	}
-
-	@Override
-	public URI getOrigin() {
-		return origin;
 	}
 
 	@Override
@@ -116,7 +109,7 @@ public class JarExternalArchiveImpl extends AbstractExternalArchive {
 
 	@Override
 	public String toString() {
-		return getClass().getSimpleName() + "[" + getOrigin() + " : " + jar.getName() + "]";
+		return getClass().getSimpleName() + "[" + jar.getName() + "]";
 	}
 
 	private byte[] computeJarHash() {

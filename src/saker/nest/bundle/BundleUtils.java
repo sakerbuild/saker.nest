@@ -40,6 +40,8 @@ import saker.build.thirdparty.saker.util.classloader.MultiClassLoader;
 import saker.build.thirdparty.saker.util.io.ByteArrayRegion;
 import saker.build.thirdparty.saker.util.io.UnsyncByteArrayOutputStream;
 import saker.build.util.java.JavaTools;
+import saker.nest.NestRepositoryFactory;
+import saker.nest.exc.IllegalArchiveEntryNameException;
 
 public class BundleUtils {
 	private static final Set<OpenOption> OPEN_OPTIONS_READ_WITHOUT_SHARING;
@@ -190,10 +192,6 @@ public class BundleUtils {
 		return jarfile.getInputStream(je);
 	}
 
-	private BundleUtils() {
-		throw new UnsupportedOperationException();
-	}
-
 	public static ClassLoader createAppropriateParentClassLoader(NestRepositoryBundle bundle) {
 		return createAppropriateParentClassLoader(bundle.getInformation());
 	}
@@ -208,6 +206,32 @@ public class BundleUtils {
 		} catch (IOException e) {
 			throw new UncheckedIOException("Failed to create JDK tools class loader.", e);
 		}
+	}
+
+	public static void checkBundleEntryNameMessage(String ename) throws IllegalArchiveEntryNameException {
+		//disallow:
+		//  empty names
+		//  names with \ as separators
+		//  names that start with /
+		//  names that contain relative names
+		//  names that contain ; or : (path separators)
+
+		if (ename.isEmpty()) {
+			throw new IllegalArchiveEntryNameException("Illegal bundle entry with empty name.");
+		}
+		if (ename.indexOf('\\') >= 0) {
+			throw new IllegalArchiveEntryNameException("Illegal " + NestRepositoryFactory.IDENTIFIER + " bundle entry: "
+					+ ename + " (the path name separator should be forward slash)");
+		}
+		if (ename.charAt(0) == '/' || "..".equals(ename) || ".".equals(ename) || ename.startsWith("./")
+				|| ename.startsWith("../") || ename.endsWith("/..") || ename.endsWith("/.") || ename.contains("/../")
+				|| ename.contains("/./") || ename.indexOf(':') >= 0 || ename.indexOf(';') >= 0) {
+			throw new IllegalArchiveEntryNameException("Illegal bundle entry name: " + ename);
+		}
+	}
+
+	private BundleUtils() {
+		throw new UnsupportedOperationException();
 	}
 
 }

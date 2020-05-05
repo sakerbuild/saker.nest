@@ -57,6 +57,7 @@ import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
+import saker.build.file.path.WildcardPath;
 import saker.build.runtime.params.ExecutionPathConfiguration;
 import saker.build.runtime.repository.TaskNotFoundException;
 import saker.build.task.TaskFactory;
@@ -68,6 +69,7 @@ import saker.build.thirdparty.saker.util.StringUtils;
 import saker.build.thirdparty.saker.util.function.Functionals;
 import saker.build.thirdparty.saker.util.io.FileUtils;
 import saker.build.thirdparty.saker.util.io.StreamUtils;
+import saker.build.thirdparty.saker.util.io.function.IOSupplier;
 import saker.build.util.java.JavaTools;
 import saker.nest.bundle.AbstractExternalArchive;
 import saker.nest.bundle.AbstractNestRepositoryBundle;
@@ -114,6 +116,7 @@ import saker.nest.dependency.DependencyResolutionLogger;
 import saker.nest.dependency.DependencyUtils;
 import saker.nest.exc.BundleDependencyUnsatisfiedException;
 import saker.nest.exc.BundleLoadingFailedException;
+import saker.nest.exc.IllegalArchiveEntryNameException;
 import saker.nest.meta.Versions;
 import saker.nest.thirdparty.org.json.JSONArray;
 import saker.nest.thirdparty.org.json.JSONObject;
@@ -1203,7 +1206,6 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 
 			BundleLookup relativebundlelookup = this.lookupConfiguration.findStorageViewBundleLookup(storageviewkey);
 
-			//TODO handle external dependencies
 			BundleInformation bundleinfo = domainbundle.getInformation();
 			ClassLoader parentcl = BundleUtils.createAppropriateParentClassLoader(bundleinfo);
 
@@ -1231,62 +1233,37 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 						//TODO check for multiple classpath kind occurrences, and make it non private if there is at least one non private
 
 						try {
-							AbstractExternalArchive extarchive = repository.externalArchives.get(archivepath);
-							if (extarchive == null) {
-								synchronized (repository.externalArchiveLoadLocks.computeIfAbsent(archivepath,
-										Functionals.objectComputer())) {
-									extarchive = repository.externalArchives.get(archivepath);
-									if (extarchive == null) {
-										if (!Files.isRegularFile(archivepath)) {
-											Path tempfile = archivepath.resolveSibling(UUID.randomUUID() + ".temp");
-											try {
-												synchronized (("nest-external-dep-load:" + archivepath).intern()) {
-													Files.createDirectories(archivepath.getParent());
-													URL url;
-													if (TestFlag.ENABLED) {
-														url = TestFlag.metric().toURL(uri);
-													} else {
-														url = uri.toURL();
-													}
-													URLConnection conn = url.openConnection();
-													if (conn instanceof HttpURLConnection) {
-														HttpURLConnection httpconn = (HttpURLConnection) conn;
-														httpconn.setRequestMethod("GET");
-														httpconn.setDoOutput(false);
-														httpconn.setDoInput(true);
-														httpconn.setConnectTimeout(10000);
-														httpconn.setReadTimeout(10000);
-													}
-													try (InputStream is = conn.getInputStream()) {
-														try (OutputStream out = Files.newOutputStream(tempfile)) {
-															StreamUtils.copyStream(is, out);
-														}
-													}
-													try {
-														Files.move(tempfile, archivepath);
-													} catch (IOException e) {
-														if (!Files.isRegularFile(archivepath)) {
-															throw e;
-														}
-														//continue, somebody loaded concurrently
-													}
-												}
-											} finally {
-												Files.deleteIfExists(tempfile);
-											}
+							AbstractExternalArchive extarchive = loadExternalArchive(uri, archivepath);
+							Set<WildcardPath> depentries = extdep.getEntries();
+							boolean privatedep = extdep.isPrivate();
+
+							if (!ObjectUtils.isNullOrEmpty(depentries)) {
+								for (String ename : extarchive.getEntryNames()) {
+									if (includesEntryName(ename, depentries)) {
+										try {
+											AbstractExternalArchive embeddedarchive = loadEmbeddedArchive(extarchive,
+													ename, archivepath);
+											NestRepositoryExternalArchiveClassLoader extcl = new NestRepositoryExternalArchiveClassLoader(
+													parentcl, embeddedarchive, extclassloaderdomain);
+											extclassloaderdomain.add(extcl);
+											externaldependencyclassloaders
+													.add(new DependentClassLoader<>(extcl, privatedep));
+										} catch (IOException | IllegalArchiveEntryNameException e) {
+											throw new BundleDependencyUnsatisfiedException(
+													"Failed to load external dependency entry: " + ename + " in " + uri,
+													e);
 										}
-										extarchive = JarExternalArchiveImpl.create(uri, archivepath);
-										repository.externalArchives.put(archivepath, extarchive);
 									}
 								}
+							} else {
+								NestRepositoryExternalArchiveClassLoader extcl = new NestRepositoryExternalArchiveClassLoader(
+										parentcl, extarchive, extclassloaderdomain);
+								extclassloaderdomain.add(extcl);
+								externaldependencyclassloaders.add(new DependentClassLoader<>(extcl, privatedep));
 							}
 							//TODO check for matching hash
 							//TODO cache classloaders
-							NestRepositoryExternalArchiveClassLoader extcl = new NestRepositoryExternalArchiveClassLoader(
-									parentcl, extarchive, extclassloaderdomain);
-							extclassloaderdomain.add(extcl);
-							externaldependencyclassloaders.add(new DependentClassLoader<>(extcl, extdep.isPrivate()));
-						} catch (IOException e) {
+						} catch (IOException | IllegalArchiveEntryNameException e) {
 							throw new BundleDependencyUnsatisfiedException("Failed to load external dependency: " + uri,
 									e);
 						}
@@ -1326,6 +1303,88 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 
 		domainClassLoaders.putAll(constructeddomaincls);
 		return result;
+	}
+
+	private AbstractExternalArchive loadEmbeddedArchive(AbstractExternalArchive extarchive, String ename,
+			Path archivepath) throws IOException {
+		Path entrypath = archivepath.resolveSibling("entries").resolve(ename);
+		return loadExternalArchiveImpl(entrypath, () -> {
+			return extarchive.openEntry(ename);
+		});
+	}
+
+	private AbstractExternalArchive loadExternalArchive(URI uri, Path archivepath) throws IOException {
+		return loadExternalArchiveImpl(archivepath, () -> {
+			URL url;
+			if (TestFlag.ENABLED) {
+				url = TestFlag.metric().toURL(uri);
+			} else {
+				url = uri.toURL();
+			}
+			URLConnection conn = url.openConnection();
+			if (conn instanceof HttpURLConnection) {
+				HttpURLConnection httpconn = (HttpURLConnection) conn;
+				httpconn.setRequestMethod("GET");
+				httpconn.setDoOutput(false);
+				httpconn.setDoInput(true);
+				httpconn.setConnectTimeout(10000);
+				httpconn.setReadTimeout(10000);
+			}
+			return conn.getInputStream();
+		});
+	}
+
+	private AbstractExternalArchive loadExternalArchiveImpl(Path archivepath,
+			IOSupplier<InputStream> archiveinputsupplier) throws IOException {
+		AbstractExternalArchive extarchive = repository.externalArchives.get(archivepath);
+		if (extarchive == null) {
+			synchronized (repository.externalArchiveLoadLocks.computeIfAbsent(archivepath,
+					Functionals.objectComputer())) {
+				extarchive = repository.externalArchives.get(archivepath);
+				if (extarchive == null) {
+					if (!Files.isRegularFile(archivepath)) {
+						Path tempfile = archivepath.resolveSibling(UUID.randomUUID() + ".temp");
+						try {
+							synchronized (("nest-external-dep-load:" + archivepath).intern()) {
+								Files.createDirectories(archivepath.getParent());
+								try (InputStream is = archiveinputsupplier.get()) {
+									try (OutputStream out = Files.newOutputStream(tempfile)) {
+										StreamUtils.copyStream(is, out);
+									}
+								}
+								try {
+									Files.move(tempfile, archivepath);
+								} catch (IOException e) {
+									if (!Files.isRegularFile(archivepath)) {
+										throw e;
+									}
+									//continue, somebody loaded concurrently
+								}
+							}
+						} finally {
+							Files.deleteIfExists(tempfile);
+						}
+					}
+					extarchive = JarExternalArchiveImpl.create(archivepath);
+					for (String ename : extarchive.getEntryNames()) {
+						//validate entries
+						BundleUtils.checkBundleEntryNameMessage(ename);
+					}
+					repository.externalArchives.put(archivepath, extarchive);
+				}
+			}
+		}
+		//TODO validate hash 
+		return extarchive;
+	}
+
+	private static boolean includesEntryName(String name, Set<WildcardPath> wildcards) {
+		for (WildcardPath wc : wildcards) {
+			if (wc.includes(name)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private Path getExternalArchivePath(URI uri, ExternalDependencyList deplist) {

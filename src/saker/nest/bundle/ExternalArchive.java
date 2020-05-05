@@ -17,7 +17,6 @@ package saker.nest.bundle;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URI;
 import java.util.NavigableSet;
 
 import saker.apiextract.api.PublicApi;
@@ -26,8 +25,6 @@ import saker.build.thirdparty.saker.util.io.StreamUtils;
 
 @PublicApi
 public interface ExternalArchive {
-	public URI getOrigin();
-
 	public NavigableSet<String> getEntryNames();
 
 	public InputStream openEntry(String name) throws NullPointerException, IOException;

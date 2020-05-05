@@ -89,6 +89,22 @@ public class NestIntegrationTestUtils {
 		}
 	}
 
+	public static ByteArrayRegion createJarWithEntries(Map<SakerPath, ByteArrayRegion> entries) {
+		UnsyncByteArrayOutputStream baos = new UnsyncByteArrayOutputStream();
+		try (JarOutputStream jaros = new JarOutputStream(baos)) {
+			for (Entry<SakerPath, ByteArrayRegion> entry : entries.entrySet()) {
+				ZipEntry ze = new ZipEntry(entry.getKey().toString());
+				ze.setLastModifiedTime(DEFAULT_ENTRY_MODIFICATION_TIME);
+				jaros.putNextEntry(ze);
+				entry.getValue().writeTo(jaros);
+				jaros.closeEntry();
+			}
+		} catch (Exception e) {
+			throw new AssertionError(e);
+		}
+		return baos.toByteArrayRegion();
+	}
+
 	public static StreamWritable createStreamWritableJarFromDirectoryWithClasses(SakerFileProvider fp,
 			SakerPath directory, Set<Class<?>> addclasses) throws IOException {
 		NavigableMap<SakerPath, ? extends FileEntry> entries = fp == null ? new TreeMap<>()

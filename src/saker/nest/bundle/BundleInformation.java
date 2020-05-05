@@ -53,9 +53,9 @@ import saker.build.thirdparty.saker.util.io.ByteArrayRegion;
 import saker.build.thirdparty.saker.util.io.SerialUtils;
 import saker.build.thirdparty.saker.util.io.StreamUtils;
 import saker.build.thirdparty.saker.util.io.UnsyncByteArrayInputStream;
-import saker.nest.NestRepositoryFactory;
 import saker.nest.bundle.lookup.BundleLookup;
 import saker.nest.bundle.storage.BundleStorageView;
+import saker.nest.exc.IllegalArchiveEntryNameException;
 import saker.nest.exc.InvalidNestBundleException;
 import saker.nest.meta.Versions;
 import saker.nest.version.VersionRange;
@@ -442,7 +442,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 			if (!entrynames.add(ename)) {
 				throw new InvalidNestBundleException("Duplicate bundle entry: " + ename);
 			}
-			checkEntryName(ename);
+			checkBundleEntryName(ename);
 		}
 
 		this.bundleId = readBundleIdentifier(bundlemanifest);
@@ -474,7 +474,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 		Set<String> entrynames = new TreeSet<>(String::compareToIgnoreCase);
 		for (ZipEntry e; (e = jis.getNextEntry()) != null;) {
 			String ename = e.getName();
-			checkEntryName(ename);
+			checkBundleEntryName(ename);
 			if (!entrynames.add(ename)) {
 				throw new InvalidNestBundleException("Duplicate bundle entry: " + ename);
 			}
@@ -551,6 +551,14 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 		this.supportedClassPathArchitectures = readSupportedArchitectures(bundlemanifest);
 
 		verifyBundleDependenciesForBundleIdentifier(dependencies, this.bundleId);
+	}
+
+	private void checkBundleEntryName(String ename) {
+		try {
+			BundleUtils.checkBundleEntryNameMessage(ename);
+		} catch (IllegalArchiveEntryNameException e) {
+			throw new InvalidNestBundleException("Illegal bundle entry.", e);
+		}
 	}
 
 	private static void validateBundleManifest(Manifest manifest) {
@@ -884,28 +892,6 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 				+ ", taskClassNames=" + taskClassNames + ", specialClasspathDependencies="
 				+ specialClasspathDependencies + ", docAttachmentBundle=" + docAttachmentBundle
 				+ ", sourceAttachmentBundle=" + sourceAttachmentBundle + ", mainClass=" + mainClass + "]";
-	}
-
-	private static void checkEntryName(String ename) {
-		//disallow:
-		//  empty names
-		//  names with \ as separators
-		//  names that start with /
-		//  names that contain relative names
-		//  names that contain ; or : (path separators)
-
-		if (ename.isEmpty()) {
-			throw new InvalidNestBundleException("Illegal bundle entry with empty name.");
-		}
-		if (ename.indexOf('\\') >= 0) {
-			throw new InvalidNestBundleException("Illegal " + NestRepositoryFactory.IDENTIFIER + " bundle entry: "
-					+ ename + " (the path name separator should be forward slash)");
-		}
-		if (ename.charAt(0) == '/' || "..".equals(ename) || ".".equals(ename) || ename.startsWith("./")
-				|| ename.startsWith("../") || ename.endsWith("/..") || ename.endsWith("/.") || ename.contains("/../")
-				|| ename.contains("/./") || ename.indexOf(':') >= 0 || ename.indexOf(';') >= 0) {
-			throw new InvalidNestBundleException("Illegal bundle entry name: " + ename);
-		}
 	}
 
 	private static NavigableSet<String> getSpecialClassPathDependencies(Manifest bundlemanifest) {
