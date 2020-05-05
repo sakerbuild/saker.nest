@@ -42,6 +42,7 @@ public final class ExternalAttachmentInformation implements Externalizable {
 	}
 	private NavigableSet<WildcardPath> entries;
 	private Map<String, String> metaData;
+	private boolean includesEnclosingArchive;
 
 	/**
 	 * For {@link Externalizable}.
@@ -65,6 +66,10 @@ public final class ExternalAttachmentInformation implements Externalizable {
 		return entries;
 	}
 
+	public boolean isIncludesEnclosingArchive() {
+		return includesEnclosingArchive;
+	}
+
 	public Map<String, String> getMetaData() {
 		return metaData;
 	}
@@ -76,6 +81,7 @@ public final class ExternalAttachmentInformation implements Externalizable {
 	public static final class Builder {
 		private NavigableSet<WildcardPath> entries;
 		private Map<String, String> metaData;
+		private boolean includesEnclosingArchive;
 
 		Builder() {
 		}
@@ -106,12 +112,17 @@ public final class ExternalAttachmentInformation implements Externalizable {
 			return this;
 		}
 
+		public void setIncludesEnclosingArchive(boolean includesEnclosingArchive) {
+			this.includesEnclosingArchive = includesEnclosingArchive;
+		}
+
 		public ExternalAttachmentInformation build() {
 			ExternalAttachmentInformation result = new ExternalAttachmentInformation();
 			result.metaData = metaData == null ? Collections.emptyMap()
 					: ImmutableUtils.makeImmutableLinkedHashMap(metaData);
 			result.entries = entries == null ? Collections.emptyNavigableSet()
 					: ImmutableUtils.makeImmutableNavigableSet(entries);
+			result.includesEnclosingArchive = includesEnclosingArchive || ObjectUtils.isNullOrEmpty(result.entries);
 			return result;
 		}
 	}
@@ -120,12 +131,14 @@ public final class ExternalAttachmentInformation implements Externalizable {
 	public void writeExternal(ObjectOutput out) throws IOException {
 		SerialUtils.writeExternalCollection(out, entries);
 		SerialUtils.writeExternalMap(out, metaData);
+		out.writeBoolean(includesEnclosingArchive);
 	}
 
 	@Override
 	public void readExternal(ObjectInput in) throws IOException, ClassNotFoundException {
 		entries = SerialUtils.readExternalImmutableNavigableSet(in);
 		metaData = SerialUtils.readExternalImmutableLinkedHashMap(in);
+		includesEnclosingArchive = in.readBoolean();
 	}
 
 	@Override
@@ -133,6 +146,7 @@ public final class ExternalAttachmentInformation implements Externalizable {
 		final int prime = 31;
 		int result = 1;
 		result = prime * result + ((entries == null) ? 0 : entries.hashCode());
+		result = prime * result + (includesEnclosingArchive ? 1231 : 1237);
 		result = prime * result + ((metaData == null) ? 0 : metaData.hashCode());
 		return result;
 	}
@@ -151,6 +165,8 @@ public final class ExternalAttachmentInformation implements Externalizable {
 				return false;
 		} else if (!entries.equals(other.entries))
 			return false;
+		if (includesEnclosingArchive != other.includesEnclosingArchive)
+			return false;
 		if (metaData == null) {
 			if (other.metaData != null)
 				return false;
@@ -163,7 +179,8 @@ public final class ExternalAttachmentInformation implements Externalizable {
 	public String toString() {
 		return getClass().getSimpleName() + "["
 				+ (!ObjectUtils.isNullOrEmpty(entries) ? "entries=" + entries + ", " : "")
-				+ (!ObjectUtils.isNullOrEmpty(metaData) ? "metaData=" + metaData : "") + "]";
+				+ (!ObjectUtils.isNullOrEmpty(metaData) ? "metaData=" + metaData + ", " : "")
+				+ "includesEnclosingArchive=" + includesEnclosingArchive + "]";
 	}
 
 }

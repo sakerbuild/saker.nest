@@ -1255,7 +1255,8 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 										}
 									}
 								}
-							} else {
+							}
+							if (extdep.isIncludesEnclosingArchive()) {
 								NestRepositoryExternalArchiveClassLoader extcl = new NestRepositoryExternalArchiveClassLoader(
 										parentcl, extarchive, extclassloaderdomain);
 								extclassloaderdomain.add(extcl);
@@ -1368,7 +1369,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 					extarchive = JarExternalArchiveImpl.create(archivepath);
 					for (String ename : extarchive.getEntryNames()) {
 						//validate entries
-						BundleUtils.checkBundleEntryNameMessage(ename);
+						BundleUtils.checkArchiveEntryName(ename);
 					}
 					repository.externalArchives.put(archivepath, extarchive);
 				}

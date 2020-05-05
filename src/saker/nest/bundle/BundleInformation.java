@@ -555,7 +555,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 
 	private void checkBundleEntryName(String ename) {
 		try {
-			BundleUtils.checkBundleEntryNameMessage(ename);
+			BundleUtils.checkArchiveEntryName(ename);
 		} catch (IllegalArchiveEntryNameException e) {
 			throw new InvalidNestBundleException("Illegal bundle entry.", e);
 		}

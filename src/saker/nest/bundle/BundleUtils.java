@@ -40,7 +40,6 @@ import saker.build.thirdparty.saker.util.classloader.MultiClassLoader;
 import saker.build.thirdparty.saker.util.io.ByteArrayRegion;
 import saker.build.thirdparty.saker.util.io.UnsyncByteArrayOutputStream;
 import saker.build.util.java.JavaTools;
-import saker.nest.NestRepositoryFactory;
 import saker.nest.exc.IllegalArchiveEntryNameException;
 
 public class BundleUtils {
@@ -208,7 +207,7 @@ public class BundleUtils {
 		}
 	}
 
-	public static void checkBundleEntryNameMessage(String ename) throws IllegalArchiveEntryNameException {
+	public static void checkArchiveEntryName(String ename) throws IllegalArchiveEntryNameException {
 		//disallow:
 		//  empty names
 		//  names with \ as separators
@@ -217,16 +216,24 @@ public class BundleUtils {
 		//  names that contain ; or : (path separators)
 
 		if (ename.isEmpty()) {
-			throw new IllegalArchiveEntryNameException("Illegal bundle entry with empty name.");
+			throw new IllegalArchiveEntryNameException("Illegal archive entry with empty name.");
 		}
 		if (ename.indexOf('\\') >= 0) {
-			throw new IllegalArchiveEntryNameException("Illegal " + NestRepositoryFactory.IDENTIFIER + " bundle entry: "
-					+ ename + " (the path name separator should be forward slash)");
+			throw new IllegalArchiveEntryNameException(
+					"Illegal archive entry: " + ename + " (the path name separator should be forward slash)");
 		}
-		if (ename.charAt(0) == '/' || "..".equals(ename) || ".".equals(ename) || ename.startsWith("./")
-				|| ename.startsWith("../") || ename.endsWith("/..") || ename.endsWith("/.") || ename.contains("/../")
-				|| ename.contains("/./") || ename.indexOf(':') >= 0 || ename.indexOf(';') >= 0) {
-			throw new IllegalArchiveEntryNameException("Illegal bundle entry name: " + ename);
+		if (ename.charAt(0) == '/') {
+			throw new IllegalArchiveEntryNameException(
+					"Illegal archive entry name: " + ename + " (name must be relative)");
+		} else if ("..".equals(ename) || ename.startsWith("../") || ename.endsWith("/..") || ename.contains("/../")) {
+			throw new IllegalArchiveEntryNameException(
+					"Illegal archive entry name: " + ename + " (.. is an illegal path name)");
+		} else if (".".equals(ename) || ename.endsWith("/.") || ename.startsWith("./") || ename.contains("/./")) {
+			throw new IllegalArchiveEntryNameException(
+					"Illegal archive entry name: " + ename + " (. is an illegal path name)");
+		} else if (ename.indexOf(':') >= 0 || ename.indexOf(';') >= 0) {
+			throw new IllegalArchiveEntryNameException(
+					"Illegal archive entry name: " + ename + " (path separators ; and : are not allowed)");
 		}
 	}
 

@@ -33,6 +33,7 @@ import java.util.Objects;
 import java.util.Map.Entry;
 import java.util.regex.Pattern;
 
+import saker.build.file.path.SakerPath;
 import saker.build.file.path.WildcardPath;
 import saker.build.thirdparty.saker.util.ImmutableUtils;
 import saker.build.thirdparty.saker.util.ObjectUtils;
@@ -43,6 +44,8 @@ import saker.nest.bundle.BundleDependencyInformation.LinePeekIterator;
 
 public final class ExternalDependencyInformation implements Externalizable {
 	private static final long serialVersionUID = 1L;
+
+	private static final WildcardPath WILDCARD_SLASH = WildcardPath.valueOf(SakerPath.PATH_SLASH);
 
 	public static final ExternalDependencyInformation EMPTY = new ExternalDependencyInformation(Collections.emptyMap());
 
@@ -169,7 +172,11 @@ public final class ExternalDependencyInformation implements Externalizable {
 								throw new IllegalArgumentException(
 										"Failed to parse entries: " + wc + " at line: " + it.getLineNumber());
 							}
-							builder.addEntry(wcpath);
+							if (WILDCARD_SLASH.equals(wcpath)) {
+								builder.setIncludesEnclosingArchive(true);
+							} else {
+								builder.addEntry(wcpath);
+							}
 						}
 						return;
 					}
@@ -336,7 +343,11 @@ public final class ExternalDependencyInformation implements Externalizable {
 							throw new IllegalArgumentException(
 									"Failed to parse entries: " + wc + " at line: " + it.getLineNumber());
 						}
-						builder.addEntry(wcpath);
+						if (WILDCARD_SLASH.equals(wcpath)) {
+							builder.setIncludesEnclosingArchive(true);
+						} else {
+							builder.addEntry(wcpath);
+						}
 					}
 					return;
 				}

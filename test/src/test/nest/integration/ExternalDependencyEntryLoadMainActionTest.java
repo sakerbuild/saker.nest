@@ -19,14 +19,12 @@ import java.nio.file.Path;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.jar.JarOutputStream;
 
 import saker.build.file.path.SakerPath;
 import saker.build.file.provider.LocalFileProvider;
 import saker.build.runtime.repository.SakerRepository;
 import saker.build.thirdparty.saker.util.ObjectUtils;
 import saker.build.thirdparty.saker.util.io.ByteArrayRegion;
-import saker.build.thirdparty.saker.util.io.UnsyncByteArrayOutputStream;
 import test.nest.util.ExternalArchiveResolvingNestMetric;
 import testing.saker.SakerTest;
 import testing.saker.build.tests.EnvironmentTestCase;
@@ -41,6 +39,12 @@ public class ExternalDependencyEntryLoadMainActionTest extends ManualLoadedRepos
 
 	public static class SimpleMain {
 		public static void main(String[] args) {
+			try {
+				System.out.println(new ExternalArchiveClass());
+				throw new AssertionError();
+			} catch (LinkageError e) {
+				//expected
+			}
 			System.setProperty(PROPERTY_NAME, ExternalFirst.hello() + ExternalSecond.hello());
 		}
 	}
@@ -59,17 +63,44 @@ public class ExternalDependencyEntryLoadMainActionTest extends ManualLoadedRepos
 		}
 	}
 
+	public static class LibsMain {
+		public static void main(String[] args) {
+			ExternalArchiveClass.main(args);
+		}
+	}
+
+	public static class ExternalArchiveClass {
+		public static void main(String[] args) {
+			System.out.println(new ExternalFirst());
+			System.out.println(new ExternalSecond());
+			System.setProperty(PROPERTY_NAME, "ext-" + ExternalFirst.hello() + ExternalSecond.hello());
+		}
+	}
+
 	private String classSubDirPath = getClass().getName().replace('.', '/');
 	private Path workingDir = EnvironmentTestCase.getTestingBaseWorkingDirectory().resolve(classSubDirPath);
 	private ExternalArchiveResolvingNestMetric nm = new ExternalArchiveResolvingNestMetric();
 	{
 		try {
-			Map<SakerPath, ByteArrayRegion> entries = new TreeMap<>();
-			entries.put(SakerPath.valueOf("lib/first.jar"),
-					NestIntegrationTestUtils.createJarBytesWithClasses(setOf(ExternalFirst.class)));
-			entries.put(SakerPath.valueOf("lib/second.jar"),
-					NestIntegrationTestUtils.createJarBytesWithClasses(setOf(ExternalSecond.class)));
-			nm.put("https://example.com/external.jar", NestIntegrationTestUtils.createJarWithEntries(entries));
+			{
+				Map<SakerPath, ByteArrayRegion> entries = new TreeMap<>();
+				entries.put(SakerPath.valueOf("lib/first.jar"),
+						NestIntegrationTestUtils.createJarBytesWithClasses(setOf(ExternalFirst.class)));
+				entries.put(SakerPath.valueOf("lib/second.jar"),
+						NestIntegrationTestUtils.createJarBytesWithClasses(setOf(ExternalSecond.class)));
+				//add it and test that it is NOT on the classpath
+				NestIntegrationTestUtils.addClassesAsEntries(entries, ExternalArchiveClass.class);
+				nm.put("https://example.com/external.jar", NestIntegrationTestUtils.createJarWithEntries(entries));
+			}
+			{
+				Map<SakerPath, ByteArrayRegion> entries = new TreeMap<>();
+				entries.put(SakerPath.valueOf("lib/first.jar"),
+						NestIntegrationTestUtils.createJarBytesWithClasses(setOf(ExternalFirst.class)));
+				entries.put(SakerPath.valueOf("lib/second.jar"),
+						NestIntegrationTestUtils.createJarBytesWithClasses(setOf(ExternalSecond.class)));
+				NestIntegrationTestUtils.addClassesAsEntries(entries, ExternalArchiveClass.class);
+				nm.put("https://example.com/libs.jar", NestIntegrationTestUtils.createJarWithEntries(entries));
+			}
 		} catch (Exception e) {
 			fail(e);
 		}
@@ -91,6 +122,7 @@ public class ExternalDependencyEntryLoadMainActionTest extends ManualLoadedRepos
 	protected void runTestOnRepo(SakerRepository repo) throws Exception {
 		TreeMap<String, Set<Class<?>>> bundleclasses = TestUtils.<String, Set<Class<?>>>treeMapBuilder()//
 				.put("simple.bundle-v1", ObjectUtils.newHashSet(SimpleMain.class))//
+				.put("libs.bundle-v1", ObjectUtils.newHashSet(LibsMain.class))//
 				.build();
 
 		System.clearProperty(PROPERTY_NAME);
@@ -101,7 +133,11 @@ public class ExternalDependencyEntryLoadMainActionTest extends ManualLoadedRepos
 
 		repo.executeAction("main", "-Unest.server.offline=true",
 				NestIntegrationTestUtils.createParameterBundlesUserParameter(bundleclasses.keySet(), bundleoutdir),
-				"-bundle", "simple.bundle-v1", "first-arg");
+				"-bundle", "simple.bundle-v1");
 		assertEquals(System.clearProperty(PROPERTY_NAME), "firstsecond");
+		repo.executeAction("main", "-Unest.server.offline=true",
+				NestIntegrationTestUtils.createParameterBundlesUserParameter(bundleclasses.keySet(), bundleoutdir),
+				"-bundle", "libs.bundle-v1");
+		assertEquals(System.clearProperty(PROPERTY_NAME), "ext-firstsecond");
 	}
 }

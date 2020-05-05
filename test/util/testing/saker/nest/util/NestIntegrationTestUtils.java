@@ -105,6 +105,13 @@ public class NestIntegrationTestUtils {
 		return baos.toByteArrayRegion();
 	}
 
+	public static void addClassesAsEntries(Map<SakerPath, ByteArrayRegion> entries, Class<?>... classes) {
+		for (Class<?> c : classes) {
+			entries.put(SakerPath.valueOf(c.getName().replace('.', '/') + ".class"),
+					ReflectUtils.getClassBytesUsingClassLoader(c));
+		}
+	}
+
 	public static StreamWritable createStreamWritableJarFromDirectoryWithClasses(SakerFileProvider fp,
 			SakerPath directory, Set<Class<?>> addclasses) throws IOException {
 		NavigableMap<SakerPath, ? extends FileEntry> entries = fp == null ? new TreeMap<>()
