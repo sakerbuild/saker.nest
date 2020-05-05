@@ -50,6 +50,7 @@ import saker.nest.bundle.BundleIdentifierHolder;
 import saker.nest.bundle.BundleInformation;
 import saker.nest.bundle.BundleKey;
 import saker.nest.bundle.DependencyConstraintConfiguration;
+import saker.nest.bundle.ExternalDependency;
 import saker.nest.bundle.lookup.BundleLookup;
 import saker.nest.exc.InvalidNestBundleException;
 import saker.nest.meta.Versions;
@@ -553,14 +554,14 @@ public class DependencyUtils {
 		return BundleIdentifier.valueOf(sb.toString());
 	}
 
-	private static boolean isVersionRangeMetaDataExcludesDependency(BundleDependency dep, String metaname,
+	private static boolean isVersionRangeMetaDataExcludesDependency(Map<String, String> metadata, String metaname,
 			String currentversionconstraint) throws NullPointerException {
 		if (currentversionconstraint == null) {
 			//if no constraint is specified, don't apply exclusion
 			return false;
 		}
-		Objects.requireNonNull(dep, "dependency");
-		String jrerange = dep.getMetaData().get(metaname);
+		Objects.requireNonNull(metadata, "metadata");
+		String jrerange = metadata.get(metaname);
 		if (jrerange == null) {
 			return false;
 		}
@@ -578,17 +579,17 @@ public class DependencyUtils {
 
 	private static final Pattern PATTERN_COMMA_WHITESPACE_SPLIT = Pattern.compile("[, \\t]+");
 
-	private static boolean isNativeArchitectureDependencyMetaDataExcludes(BundleDependency dependency,
+	private static boolean isNativeArchitectureDependencyMetaDataExcludes(Map<String, String> metadata,
 			String architecture) throws NullPointerException {
 		if (architecture == null) {
 			return false;
 		}
-		Objects.requireNonNull(dependency, "dependency");
-		String metadata = dependency.getMetaData().get(BundleInformation.DEPENDENCY_META_NATIVE_ARCHITECTURE);
-		if (metadata == null) {
+		Objects.requireNonNull(metadata, "metadata");
+		String nativearchmetaval = metadata.get(BundleInformation.DEPENDENCY_META_NATIVE_ARCHITECTURE);
+		if (nativearchmetaval == null) {
 			return false;
 		}
-		for (String arch : PATTERN_COMMA_WHITESPACE_SPLIT.split(metadata)) {
+		for (String arch : PATTERN_COMMA_WHITESPACE_SPLIT.split(nativearchmetaval)) {
 			if (architecture.equals(arch)) {
 				return false;
 			}
@@ -623,21 +624,66 @@ public class DependencyUtils {
 			return false;
 		}
 		Objects.requireNonNull(dependency, "dependency");
-		if (DependencyUtils.isVersionRangeMetaDataExcludesDependency(dependency,
-				BundleInformation.DEPENDENCY_META_JRE_VERSION,
+		Map<String, String> metadata = dependency.getMetaData();
+		if (isVersionRangeMetaDataExcludesDependency(metadata, BundleInformation.DEPENDENCY_META_JRE_VERSION,
 				Objects.toString(constraints.getJreMajorVersion(), null))) {
 			return true;
 		}
-		if (DependencyUtils.isVersionRangeMetaDataExcludesDependency(dependency,
-				BundleInformation.DEPENDENCY_META_BUILD_SYSTEM_VERSION, constraints.getBuildSystemVersion())) {
+		if (isVersionRangeMetaDataExcludesDependency(metadata, BundleInformation.DEPENDENCY_META_BUILD_SYSTEM_VERSION,
+				constraints.getBuildSystemVersion())) {
 			return true;
 		}
-		if (DependencyUtils.isVersionRangeMetaDataExcludesDependency(dependency,
-				BundleInformation.DEPENDENCY_META_REPOSITORY_VERSION, constraints.getRepositoryVersion())) {
+		if (isVersionRangeMetaDataExcludesDependency(metadata, BundleInformation.DEPENDENCY_META_REPOSITORY_VERSION,
+				constraints.getRepositoryVersion())) {
 			return true;
 		}
-		if (DependencyUtils.isNativeArchitectureDependencyMetaDataExcludes(dependency,
-				constraints.getNativeArchitecture())) {
+		if (isNativeArchitectureDependencyMetaDataExcludes(metadata, constraints.getNativeArchitecture())) {
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Checks if the given constraint configuration excludes the specified external dependency.
+	 * <p>
+	 * The method will check the {@linkplain ExternalDependency#getMetaData() meta-data} of the dependency and examine
+	 * it against the specified constraint configuration. The constraint meta-data names declared in
+	 * {@link BundleInformation} will be used to determine exclusion.
+	 * <p>
+	 * If the argument constraint configuration object is <code>null</code>, <code>false</code> is returned.
+	 * 
+	 * @param constraints
+	 *            The constraint configuration.
+	 * @param dependency
+	 *            The dependency to examine.
+	 * @return <code>true</code> if the dependency should be excluded.
+	 * @throws NullPointerException
+	 *             If the dependency is <code>null</code>.
+	 * @see BundleInformation#DEPENDENCY_META_JRE_VERSION
+	 * @see BundleInformation#DEPENDENCY_META_NATIVE_ARCHITECTURE
+	 * @see BundleInformation#DEPENDENCY_META_REPOSITORY_VERSION
+	 * @see BundleInformation#DEPENDENCY_META_BUILD_SYSTEM_VERSION
+	 */
+	public static boolean isDependencyConstraintExcludes(DependencyConstraintConfiguration constraints,
+			ExternalDependency dependency) throws NullPointerException {
+		if (constraints == null) {
+			return false;
+		}
+		Objects.requireNonNull(dependency, "dependency");
+		Map<String, String> metadata = dependency.getMetaData();
+		if (isVersionRangeMetaDataExcludesDependency(metadata, BundleInformation.DEPENDENCY_META_JRE_VERSION,
+				Objects.toString(constraints.getJreMajorVersion(), null))) {
+			return true;
+		}
+		if (isVersionRangeMetaDataExcludesDependency(metadata, BundleInformation.DEPENDENCY_META_BUILD_SYSTEM_VERSION,
+				constraints.getBuildSystemVersion())) {
+			return true;
+		}
+		if (isVersionRangeMetaDataExcludesDependency(metadata, BundleInformation.DEPENDENCY_META_REPOSITORY_VERSION,
+				constraints.getRepositoryVersion())) {
+			return true;
+		}
+		if (isNativeArchitectureDependencyMetaDataExcludes(metadata, constraints.getNativeArchitecture())) {
 			return true;
 		}
 		return false;

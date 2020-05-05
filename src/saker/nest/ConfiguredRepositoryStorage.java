@@ -164,7 +164,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 
 	private transient final ConcurrentSkipListMap<TaskName, Supplier<? extends TaskFactory<?>>> taskClasses = new ConcurrentSkipListMap<>();
 
-	private DependencyConstraintConfiguration constraintConfiguration;
+	private final DependencyConstraintConfiguration constraintConfiguration;
 
 	private final Object detectChangeLock = new Object();
 	private DetectedChanges expectedDetectedChanges;
@@ -1219,77 +1219,79 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 						.entrySet()) {
 					ExternalDependencyList deplist = entry.getValue();
 					for (ExternalDependency extdep : deplist.getDependencies()) {
+						if (DependencyUtils.isDependencyConstraintExcludes(constraintConfiguration, extdep)) {
+							continue;
+						}
 						Set<String> kinds = extdep.getKinds();
-						if (kinds.contains(BundleInformation.DEPENDENCY_KIND_CLASSPATH)) {
-							URI uri = entry.getKey();
-							Path archivepath = getExternalArchivePath(uri, deplist);
-							//TODO filter based on constraints
-							//TODO check for multiple classpath kind occurrences, and make it non private if there is at least one non private
+						if (!kinds.contains(BundleInformation.DEPENDENCY_KIND_CLASSPATH)) {
+							continue;
+						}
+						URI uri = entry.getKey();
+						Path archivepath = getExternalArchivePath(uri, deplist);
+						//TODO check for multiple classpath kind occurrences, and make it non private if there is at least one non private
 
-							try {
-								AbstractExternalArchive extarchive = repository.externalArchives.get(archivepath);
-								if (extarchive == null) {
-									synchronized (repository.externalArchiveLoadLocks.computeIfAbsent(archivepath,
-											Functionals.objectComputer())) {
-										extarchive = repository.externalArchives.get(archivepath);
-										if (extarchive == null) {
-											if (!Files.isRegularFile(archivepath)) {
-												Path tempfile = archivepath.resolveSibling(UUID.randomUUID() + ".temp");
-												try {
-													synchronized (("nest-external-dep-load:" + archivepath).intern()) {
-														Files.createDirectories(archivepath.getParent());
-														URL url;
-														if (TestFlag.ENABLED) {
-															url = TestFlag.metric().toURL(uri);
-														} else {
-															url = uri.toURL();
-														}
-														URLConnection conn = url.openConnection();
-														if (conn instanceof HttpURLConnection) {
-															HttpURLConnection httpconn = (HttpURLConnection) conn;
-															httpconn.setRequestMethod("GET");
-															httpconn.setDoOutput(false);
-															httpconn.setDoInput(true);
-															httpconn.setConnectTimeout(10000);
-															httpconn.setReadTimeout(10000);
-														}
-														try (InputStream is = conn.getInputStream()) {
-															try (OutputStream out = Files.newOutputStream(tempfile)) {
-																StreamUtils.copyStream(is, out);
-															}
-														}
-														try {
-															Files.move(tempfile, archivepath);
-														} catch (IOException e) {
-															if (!Files.isRegularFile(archivepath)) {
-																throw e;
-															}
-															//continue, somebody loaded concurrently
+						try {
+							AbstractExternalArchive extarchive = repository.externalArchives.get(archivepath);
+							if (extarchive == null) {
+								synchronized (repository.externalArchiveLoadLocks.computeIfAbsent(archivepath,
+										Functionals.objectComputer())) {
+									extarchive = repository.externalArchives.get(archivepath);
+									if (extarchive == null) {
+										if (!Files.isRegularFile(archivepath)) {
+											Path tempfile = archivepath.resolveSibling(UUID.randomUUID() + ".temp");
+											try {
+												synchronized (("nest-external-dep-load:" + archivepath).intern()) {
+													Files.createDirectories(archivepath.getParent());
+													URL url;
+													if (TestFlag.ENABLED) {
+														url = TestFlag.metric().toURL(uri);
+													} else {
+														url = uri.toURL();
+													}
+													URLConnection conn = url.openConnection();
+													if (conn instanceof HttpURLConnection) {
+														HttpURLConnection httpconn = (HttpURLConnection) conn;
+														httpconn.setRequestMethod("GET");
+														httpconn.setDoOutput(false);
+														httpconn.setDoInput(true);
+														httpconn.setConnectTimeout(10000);
+														httpconn.setReadTimeout(10000);
+													}
+													try (InputStream is = conn.getInputStream()) {
+														try (OutputStream out = Files.newOutputStream(tempfile)) {
+															StreamUtils.copyStream(is, out);
 														}
 													}
-												} finally {
-													Files.deleteIfExists(tempfile);
+													try {
+														Files.move(tempfile, archivepath);
+													} catch (IOException e) {
+														if (!Files.isRegularFile(archivepath)) {
+															throw e;
+														}
+														//continue, somebody loaded concurrently
+													}
 												}
+											} finally {
+												Files.deleteIfExists(tempfile);
 											}
-											extarchive = JarExternalArchiveImpl.create(uri, archivepath);
-											repository.externalArchives.put(archivepath, extarchive);
 										}
+										extarchive = JarExternalArchiveImpl.create(uri, archivepath);
+										repository.externalArchives.put(archivepath, extarchive);
 									}
 								}
-								//TODO check for matching hash
-								//TODO cache classloaders
-								NestRepositoryExternalArchiveClassLoader extcl = new NestRepositoryExternalArchiveClassLoader(
-										parentcl, extarchive, extclassloaderdomain);
-								extclassloaderdomain.add(extcl);
-								externaldependencyclassloaders
-										.add(new DependentClassLoader<>(extcl, extdep.isPrivate()));
-							} catch (IOException e) {
-								throw new BundleDependencyUnsatisfiedException(
-										"Failed to load external dependency: " + uri, e);
 							}
-
-							break;
+							//TODO check for matching hash
+							//TODO cache classloaders
+							NestRepositoryExternalArchiveClassLoader extcl = new NestRepositoryExternalArchiveClassLoader(
+									parentcl, extarchive, extclassloaderdomain);
+							extclassloaderdomain.add(extcl);
+							externaldependencyclassloaders.add(new DependentClassLoader<>(extcl, extdep.isPrivate()));
+						} catch (IOException e) {
+							throw new BundleDependencyUnsatisfiedException("Failed to load external dependency: " + uri,
+									e);
 						}
+
+						break;
 					}
 				}
 			}
@@ -1301,9 +1303,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			constructeddomaincls.put(domain, constructedcl);
 		}
 
-		for (
-
-		Entry<ClassLoaderDomain, Map<BundleKey, DependentClassLoader<NestRepositoryBundleClassLoader>>> entry : constructedcldependencies
+		for (Entry<ClassLoaderDomain, Map<BundleKey, DependentClassLoader<NestRepositoryBundleClassLoader>>> entry : constructedcldependencies
 				.entrySet()) {
 			Map<BundleKey, DependentClassLoader<NestRepositoryBundleClassLoader>> cldepmap = entry.getValue();
 			for (Entry<? extends BundleKey, ClassLoaderDomain.DomainDependency> depentry : entry.getKey().dependencies
