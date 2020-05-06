@@ -27,6 +27,7 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.UnsupportedEncodingException;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.channels.Channels;
@@ -88,7 +89,10 @@ import saker.nest.ConfiguredRepositoryStorage;
 import saker.nest.NestRepositoryImpl;
 import saker.nest.bundle.AbstractNestRepositoryBundle;
 import saker.nest.bundle.BundleIdentifier;
+import saker.nest.bundle.BundleInformation;
 import saker.nest.bundle.BundleUtils;
+import saker.nest.bundle.ExternalDependencyInformation;
+import saker.nest.bundle.ExternalDependencyList;
 import saker.nest.bundle.JarNestRepositoryBundleImpl;
 import saker.nest.bundle.NestRepositoryBundle;
 import saker.nest.exc.BundleLoadingFailedException;
@@ -914,8 +918,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 							//we can continue execution, as we verify the contents of the JAR before opening it
 						}
 						try {
-							JarNestRepositoryBundleImpl result = JarNestRepositoryBundleImpl.create(this,
-									resultjarpath);
+							JarNestRepositoryBundleImpl result = createBundle(resultjarpath);
 
 							try {
 								if (!bundleid.equals(result.getBundleIdentifier())) {
@@ -971,6 +974,24 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		} catch (IOException e) {
 			throw new BundleLoadingFailedException("Failed to download bundle: " + bundleid, e);
 		}
+	}
+
+	private JarNestRepositoryBundleImpl createBundle(Path resultjarpath) throws IOException {
+		//require that any external dependencies have sha-256 defined for them
+
+		JarNestRepositoryBundleImpl result = JarNestRepositoryBundleImpl.create(this, resultjarpath);
+		BundleInformation info = result.getInformation();
+		ExternalDependencyInformation extdeps = info.getExternalDependencyInformation();
+		if (!extdeps.isEmpty()) {
+			for (Entry<URI, ? extends ExternalDependencyList> entry : extdeps.getDependencies().entrySet()) {
+				ExternalDependencyList deplist = entry.getValue();
+				if (deplist.getSha256Hash() == null) {
+					throw new InvalidNestBundleException("Bundle " + info.getBundleIdentifier()
+							+ " declares external dependency without SHA-256 hash value: " + entry.getKey());
+				}
+			}
+		}
+		return result;
 	}
 
 	private static String readErrorStreamOrEmpty(IOSupplier<? extends InputStream> errstream) throws IOException {
@@ -1953,8 +1974,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 				Path bundlejarpath = BundleUtils.getVersionedBundleJarPath(bundlesDirectory, bundleid);
 				if (Files.isRegularFile(bundlejarpath)) {
 					try {
-						JarNestRepositoryBundleImpl created = JarNestRepositoryBundleImpl
-								.create(ServerBundleStorage.this, bundlejarpath);
+						JarNestRepositoryBundleImpl created = createBundle(bundlejarpath);
 						try {
 							if (!bundleid.equals(created.getBundleIdentifier())) {
 								throw new BundleLoadingFailedException("Bundle identifier mismatch: "

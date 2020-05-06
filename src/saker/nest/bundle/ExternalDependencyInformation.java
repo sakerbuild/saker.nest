@@ -98,7 +98,8 @@ public final class ExternalDependencyInformation implements Externalizable {
 //				meta: abc
 //				entries: lib/**.jar
 //			source-attachment: https://example.com/path/to/sources-v1.jar
-//				entries: lib/*-v1.jar
+//				entries: src/sources.jar
+//				target: lib/*-v1.jar
 //				SHA-256: hexa
 //			source-attachment: https://example.com/path/to/sources-v2.jar
 //				entries: lib/*-v2.jar
@@ -347,6 +348,26 @@ public final class ExternalDependencyInformation implements Externalizable {
 							builder.setIncludesMainArchive(true);
 						} else {
 							builder.addEntry(wcpath);
+						}
+					}
+					return;
+				}
+				if ("target".equals(name)) {
+					for (String wc : Pattern.compile("[;]+").split(content)) {
+						if (wc.isEmpty()) {
+							continue;
+						}
+						WildcardPath wcpath;
+						try {
+							wcpath = WildcardPath.valueOf(wc);
+						} catch (Exception e) {
+							throw new IllegalArgumentException(
+									"Failed to parse target: " + wc + " at line: " + it.getLineNumber());
+						}
+						if (WILDCARD_SLASH.equals(wcpath)) {
+							builder.setTargetsMainArchive(true);
+						} else {
+							builder.addTargetEntry(wcpath);
 						}
 					}
 					return;

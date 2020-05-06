@@ -38,11 +38,14 @@ public final class ExternalAttachmentInformation implements Externalizable {
 	public static final ExternalAttachmentInformation EMPTY = new ExternalAttachmentInformation();
 	static {
 		EMPTY.entries = Collections.emptyNavigableSet();
+		EMPTY.targetEntries = Collections.emptyNavigableSet();
 		EMPTY.metaData = Collections.emptyMap();
 	}
 	private NavigableSet<WildcardPath> entries;
+	private NavigableSet<WildcardPath> targetEntries;
 	private Map<String, String> metaData;
 	private boolean includesMainArchive;
+	private boolean targetsMainArchive;
 
 	/**
 	 * For {@link Externalizable}.
@@ -66,12 +69,90 @@ public final class ExternalAttachmentInformation implements Externalizable {
 		return entries;
 	}
 
+	public NavigableSet<WildcardPath> getTargetEntries() {
+		return targetEntries;
+	}
+
 	public boolean isIncludesMainArchive() {
 		return includesMainArchive;
 	}
 
+	public boolean isTargetsMainArchive() {
+		return targetsMainArchive;
+	}
+
 	public Map<String, String> getMetaData() {
 		return metaData;
+	}
+
+	@Override
+	public void writeExternal(ObjectOutput out) throws IOException {
+		SerialUtils.writeExternalCollection(out, entries);
+		SerialUtils.writeExternalCollection(out, targetEntries);
+		SerialUtils.writeExternalMap(out, metaData);
+		out.writeBoolean(includesMainArchive);
+		out.writeBoolean(targetsMainArchive);
+	}
+
+	@Override
+	public void readExternal(ObjectInput in) throws IOException, ClassNotFoundException {
+		entries = SerialUtils.readExternalImmutableNavigableSet(in);
+		targetEntries = SerialUtils.readExternalImmutableNavigableSet(in);
+		metaData = SerialUtils.readExternalImmutableLinkedHashMap(in);
+		includesMainArchive = in.readBoolean();
+		targetsMainArchive = in.readBoolean();
+	}
+
+	@Override
+	public int hashCode() {
+		final int prime = 31;
+		int result = 1;
+		result = prime * result + ((entries == null) ? 0 : entries.hashCode());
+		result = prime * result + (includesMainArchive ? 1231 : 1237);
+		result = prime * result + ((metaData == null) ? 0 : metaData.hashCode());
+		result = prime * result + ((targetEntries == null) ? 0 : targetEntries.hashCode());
+		result = prime * result + (targetsMainArchive ? 1231 : 1237);
+		return result;
+	}
+
+	@Override
+	public boolean equals(Object obj) {
+		if (this == obj)
+			return true;
+		if (obj == null)
+			return false;
+		if (getClass() != obj.getClass())
+			return false;
+		ExternalAttachmentInformation other = (ExternalAttachmentInformation) obj;
+		if (entries == null) {
+			if (other.entries != null)
+				return false;
+		} else if (!entries.equals(other.entries))
+			return false;
+		if (includesMainArchive != other.includesMainArchive)
+			return false;
+		if (metaData == null) {
+			if (other.metaData != null)
+				return false;
+		} else if (!metaData.equals(other.metaData))
+			return false;
+		if (targetEntries == null) {
+			if (other.targetEntries != null)
+				return false;
+		} else if (!targetEntries.equals(other.targetEntries))
+			return false;
+		if (targetsMainArchive != other.targetsMainArchive)
+			return false;
+		return true;
+	}
+
+	@Override
+	public String toString() {
+		return getClass().getSimpleName() + "["
+				+ (ObjectUtils.isNullOrEmpty(entries) ? "entries=" + entries + ", " : "")
+				+ (ObjectUtils.isNullOrEmpty(targetEntries) ? "targetEntries=" + targetEntries + ", " : "")
+				+ (ObjectUtils.isNullOrEmpty(metaData) ? "metaData=" + metaData + ", " : "") + "includesMainArchive="
+				+ includesMainArchive + ", targetsMainArchive=" + targetsMainArchive + "]";
 	}
 
 	public static ExternalAttachmentInformation.Builder builder() {
@@ -80,8 +161,10 @@ public final class ExternalAttachmentInformation implements Externalizable {
 
 	public static final class Builder {
 		private NavigableSet<WildcardPath> entries;
+		private NavigableSet<WildcardPath> targetEntries;
 		private Map<String, String> metaData;
 		private boolean includesMainArchive;
+		private boolean targetsMainArchive;
 
 		Builder() {
 		}
@@ -112,8 +195,21 @@ public final class ExternalAttachmentInformation implements Externalizable {
 			return this;
 		}
 
+		public Builder addTargetEntry(WildcardPath wildcard) throws NullPointerException {
+			Objects.requireNonNull(wildcard, "wildcard");
+			if (this.targetEntries == null) {
+				this.targetEntries = new TreeSet<>();
+			}
+			this.targetEntries.add(wildcard);
+			return this;
+		}
+
 		public void setIncludesMainArchive(boolean includesMainArchive) {
 			this.includesMainArchive = includesMainArchive;
+		}
+
+		public void setTargetsMainArchive(boolean targetsMainArchive) {
+			this.targetsMainArchive = targetsMainArchive;
 		}
 
 		public ExternalAttachmentInformation build() {
@@ -122,65 +218,12 @@ public final class ExternalAttachmentInformation implements Externalizable {
 					: ImmutableUtils.makeImmutableLinkedHashMap(metaData);
 			result.entries = entries == null ? Collections.emptyNavigableSet()
 					: ImmutableUtils.makeImmutableNavigableSet(entries);
+			result.targetEntries = targetEntries == null ? Collections.emptyNavigableSet()
+					: ImmutableUtils.makeImmutableNavigableSet(targetEntries);
 			result.includesMainArchive = includesMainArchive || ObjectUtils.isNullOrEmpty(result.entries);
+			result.targetsMainArchive = targetsMainArchive || ObjectUtils.isNullOrEmpty(result.targetEntries);
 			return result;
 		}
-	}
-
-	@Override
-	public void writeExternal(ObjectOutput out) throws IOException {
-		SerialUtils.writeExternalCollection(out, entries);
-		SerialUtils.writeExternalMap(out, metaData);
-		out.writeBoolean(includesMainArchive);
-	}
-
-	@Override
-	public void readExternal(ObjectInput in) throws IOException, ClassNotFoundException {
-		entries = SerialUtils.readExternalImmutableNavigableSet(in);
-		metaData = SerialUtils.readExternalImmutableLinkedHashMap(in);
-		includesMainArchive = in.readBoolean();
-	}
-
-	@Override
-	public int hashCode() {
-		final int prime = 31;
-		int result = 1;
-		result = prime * result + ((entries == null) ? 0 : entries.hashCode());
-		result = prime * result + (includesMainArchive ? 1231 : 1237);
-		result = prime * result + ((metaData == null) ? 0 : metaData.hashCode());
-		return result;
-	}
-
-	@Override
-	public boolean equals(Object obj) {
-		if (this == obj)
-			return true;
-		if (obj == null)
-			return false;
-		if (getClass() != obj.getClass())
-			return false;
-		ExternalAttachmentInformation other = (ExternalAttachmentInformation) obj;
-		if (entries == null) {
-			if (other.entries != null)
-				return false;
-		} else if (!entries.equals(other.entries))
-			return false;
-		if (includesMainArchive != other.includesMainArchive)
-			return false;
-		if (metaData == null) {
-			if (other.metaData != null)
-				return false;
-		} else if (!metaData.equals(other.metaData))
-			return false;
-		return true;
-	}
-
-	@Override
-	public String toString() {
-		return getClass().getSimpleName() + "["
-				+ (!ObjectUtils.isNullOrEmpty(entries) ? "entries=" + entries + ", " : "")
-				+ (!ObjectUtils.isNullOrEmpty(metaData) ? "metaData=" + metaData + ", " : "")
-				+ "includesMainArchive=" + includesMainArchive + "]";
 	}
 
 }

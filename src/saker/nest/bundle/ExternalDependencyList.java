@@ -81,88 +81,6 @@ public final class ExternalDependencyList implements Externalizable {
 		return ObjectUtils.isNullOrEmpty(dependencies);
 	}
 
-	public static ExternalDependencyList.Builder builder() {
-		return new Builder();
-	}
-
-	public static final class Builder {
-		private String sha256Hash;
-		private String sha1Hash;
-		private String md5Hash;
-		private Map<URI, ExternalAttachmentInformation> sourceAttachments = new LinkedHashMap<>();
-		private Map<URI, ExternalAttachmentInformation> documentationAttachments = new LinkedHashMap<>();
-
-		private Set<ExternalDependency> dependencies = new LinkedHashSet<>();
-
-		Builder() {
-		}
-
-		public String getSha256Hash() {
-			return sha256Hash;
-		}
-
-		public String getSha1Hash() {
-			return sha1Hash;
-		}
-
-		public String getMd5Hash() {
-			return md5Hash;
-		}
-
-		public Builder setSha256Hash(String sha256Hash) {
-			this.sha256Hash = sha256Hash;
-			return this;
-		}
-
-		public Builder setSha1Hash(String sha1Hash) {
-			this.sha1Hash = sha1Hash;
-			return this;
-		}
-
-		public Builder setMd5Hash(String md5Hash) {
-			this.md5Hash = md5Hash;
-			return this;
-		}
-
-		public Builder addDepdendency(ExternalDependency dep) {
-			this.dependencies.add(dep);
-			return this;
-		}
-
-		public boolean hasSourceAttachment(URI uri) {
-			return sourceAttachments.containsKey(uri);
-		}
-
-		public Builder addSourceAttachment(URI uri, ExternalAttachmentInformation info) {
-			Objects.requireNonNull(uri, "uri");
-			Objects.requireNonNull(info, "external attachment info");
-			this.sourceAttachments.put(uri, info);
-			return this;
-		}
-
-		public boolean hasDocumentationAttachment(URI uri) {
-			return documentationAttachments.containsKey(uri);
-		}
-
-		public Builder addDocumentationAttachment(URI uri, ExternalAttachmentInformation info) {
-			Objects.requireNonNull(uri, "uri");
-			Objects.requireNonNull(info, "external attachment info");
-			this.documentationAttachments.put(uri, info);
-			return this;
-		}
-
-		public ExternalDependencyList build() {
-			ExternalDependencyList res = new ExternalDependencyList();
-			res.sha256Hash = this.sha256Hash;
-			res.sha1Hash = this.sha1Hash;
-			res.md5Hash = this.md5Hash;
-			res.sourceAttachments = ImmutableUtils.makeImmutableLinkedHashMap(this.sourceAttachments);
-			res.documentationAttachments = ImmutableUtils.makeImmutableLinkedHashMap(this.documentationAttachments);
-			res.dependencies = ImmutableUtils.makeImmutableLinkedHashSet(this.dependencies);
-			return res;
-		}
-	}
-
 	@Override
 	public void writeExternal(ObjectOutput out) throws IOException {
 		out.writeObject(sha256Hash);
@@ -249,6 +167,88 @@ public final class ExternalDependencyList implements Externalizable {
 						? "documentationAttachments=" + documentationAttachments
 						: "")
 				+ "]";
+	}
+
+	public static ExternalDependencyList.Builder builder() {
+		return new Builder();
+	}
+
+	public static final class Builder {
+		private String sha256Hash;
+		private String sha1Hash;
+		private String md5Hash;
+		private Map<URI, ExternalAttachmentInformation> sourceAttachments = new LinkedHashMap<>();
+		private Map<URI, ExternalAttachmentInformation> documentationAttachments = new LinkedHashMap<>();
+
+		private Set<ExternalDependency> dependencies = new LinkedHashSet<>();
+
+		Builder() {
+		}
+
+		public String getSha256Hash() {
+			return sha256Hash;
+		}
+
+		public String getSha1Hash() {
+			return sha1Hash;
+		}
+
+		public String getMd5Hash() {
+			return md5Hash;
+		}
+
+		public Builder setSha256Hash(String sha256Hash) {
+			this.sha256Hash = sha256Hash;
+			return this;
+		}
+
+		public Builder setSha1Hash(String sha1Hash) {
+			this.sha1Hash = sha1Hash;
+			return this;
+		}
+
+		public Builder setMd5Hash(String md5Hash) {
+			this.md5Hash = md5Hash;
+			return this;
+		}
+
+		public Builder addDepdendency(ExternalDependency dep) {
+			this.dependencies.add(dep);
+			return this;
+		}
+
+		public boolean hasSourceAttachment(URI uri) {
+			return sourceAttachments.containsKey(uri);
+		}
+
+		public Builder addSourceAttachment(URI uri, ExternalAttachmentInformation info) {
+			Objects.requireNonNull(uri, "uri");
+			Objects.requireNonNull(info, "external attachment info");
+			this.sourceAttachments.put(uri, info);
+			return this;
+		}
+
+		public boolean hasDocumentationAttachment(URI uri) {
+			return documentationAttachments.containsKey(uri);
+		}
+
+		public Builder addDocumentationAttachment(URI uri, ExternalAttachmentInformation info) {
+			Objects.requireNonNull(uri, "uri");
+			Objects.requireNonNull(info, "external attachment info");
+			this.documentationAttachments.put(uri, info);
+			return this;
+		}
+
+		public ExternalDependencyList build() {
+			ExternalDependencyList res = new ExternalDependencyList();
+			res.sha256Hash = this.sha256Hash;
+			res.sha1Hash = this.sha1Hash;
+			res.md5Hash = this.md5Hash;
+			res.sourceAttachments = ImmutableUtils.makeImmutableLinkedHashMap(this.sourceAttachments);
+			res.documentationAttachments = ImmutableUtils.makeImmutableLinkedHashMap(this.documentationAttachments);
+			res.dependencies = ImmutableUtils.makeImmutableLinkedHashSet(this.dependencies);
+			return res;
+		}
 	}
 
 }

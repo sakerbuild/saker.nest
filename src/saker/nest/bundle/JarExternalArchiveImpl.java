@@ -32,7 +32,7 @@ import saker.build.thirdparty.saker.util.io.IOUtils;
 import saker.build.thirdparty.saker.util.io.JarFileUtils;
 import saker.build.thirdparty.saker.util.io.SerialUtils;
 
-public class JarExternalArchiveImpl extends AbstractExternalArchive {
+public class JarExternalArchiveImpl extends AbstractExternalArchive implements JarExternalArchive {
 	private final SeekableByteChannel channel;
 	private final JarFile jar;
 	private final LazySupplier<NavigableSet<String>> entryNames;
@@ -92,6 +92,7 @@ public class JarExternalArchiveImpl extends AbstractExternalArchive {
 		return BundleUtils.getJarEntryBytes(jar, name);
 	}
 
+	@Override
 	public Path getJarPath() {
 		return Paths.get(jar.getName());
 	}

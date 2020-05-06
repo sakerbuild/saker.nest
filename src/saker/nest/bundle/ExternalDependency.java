@@ -86,6 +86,70 @@ public final class ExternalDependency implements Externalizable {
 		return Boolean.parseBoolean(metaData.get(BundleInformation.DEPENDENCY_META_OPTIONAL));
 	}
 
+	@Override
+	public void writeExternal(ObjectOutput out) throws IOException {
+		SerialUtils.writeExternalCollection(out, kinds);
+		SerialUtils.writeExternalCollection(out, entries);
+		SerialUtils.writeExternalMap(out, metaData);
+		out.writeBoolean(includesMainArchive);
+	}
+
+	@Override
+	public void readExternal(ObjectInput in) throws IOException, ClassNotFoundException {
+		kinds = SerialUtils.readExternalImmutableNavigableSet(in);
+		entries = SerialUtils.readExternalImmutableNavigableSet(in);
+		metaData = SerialUtils.readExternalImmutableLinkedHashMap(in);
+		includesMainArchive = in.readBoolean();
+	}
+
+	@Override
+	public int hashCode() {
+		final int prime = 31;
+		int result = 1;
+		result = prime * result + ((entries == null) ? 0 : entries.hashCode());
+		result = prime * result + (includesMainArchive ? 1231 : 1237);
+		result = prime * result + ((kinds == null) ? 0 : kinds.hashCode());
+		result = prime * result + ((metaData == null) ? 0 : metaData.hashCode());
+		return result;
+	}
+
+	@Override
+	public boolean equals(Object obj) {
+		if (this == obj)
+			return true;
+		if (obj == null)
+			return false;
+		if (getClass() != obj.getClass())
+			return false;
+		ExternalDependency other = (ExternalDependency) obj;
+		if (entries == null) {
+			if (other.entries != null)
+				return false;
+		} else if (!entries.equals(other.entries))
+			return false;
+		if (includesMainArchive != other.includesMainArchive)
+			return false;
+		if (kinds == null) {
+			if (other.kinds != null)
+				return false;
+		} else if (!kinds.equals(other.kinds))
+			return false;
+		if (metaData == null) {
+			if (other.metaData != null)
+				return false;
+		} else if (!metaData.equals(other.metaData))
+			return false;
+		return true;
+	}
+
+	@Override
+	public String toString() {
+		return getClass().getSimpleName() + "[" + (!ObjectUtils.isNullOrEmpty(kinds) ? "kinds=" + kinds + ", " : "")
+				+ (!ObjectUtils.isNullOrEmpty(metaData) ? "metaData=" + metaData + ", " : "")
+				+ (!ObjectUtils.isNullOrEmpty(entries) ? "entries=" + entries + ", " : "") + "includesMainArchive="
+				+ includesMainArchive + "]";
+	}
+
 	public static ExternalDependency.Builder builder() {
 		return new Builder();
 	}
@@ -151,70 +215,6 @@ public final class ExternalDependency implements Externalizable {
 			result.includesMainArchive = includesMainArchive || ObjectUtils.isNullOrEmpty(result.entries);
 			return result;
 		}
-	}
-
-	@Override
-	public void writeExternal(ObjectOutput out) throws IOException {
-		SerialUtils.writeExternalCollection(out, kinds);
-		SerialUtils.writeExternalCollection(out, entries);
-		SerialUtils.writeExternalMap(out, metaData);
-		out.writeBoolean(includesMainArchive);
-	}
-
-	@Override
-	public void readExternal(ObjectInput in) throws IOException, ClassNotFoundException {
-		kinds = SerialUtils.readExternalImmutableNavigableSet(in);
-		entries = SerialUtils.readExternalImmutableNavigableSet(in);
-		metaData = SerialUtils.readExternalImmutableLinkedHashMap(in);
-		includesMainArchive = in.readBoolean();
-	}
-
-	@Override
-	public int hashCode() {
-		final int prime = 31;
-		int result = 1;
-		result = prime * result + ((entries == null) ? 0 : entries.hashCode());
-		result = prime * result + (includesMainArchive ? 1231 : 1237);
-		result = prime * result + ((kinds == null) ? 0 : kinds.hashCode());
-		result = prime * result + ((metaData == null) ? 0 : metaData.hashCode());
-		return result;
-	}
-
-	@Override
-	public boolean equals(Object obj) {
-		if (this == obj)
-			return true;
-		if (obj == null)
-			return false;
-		if (getClass() != obj.getClass())
-			return false;
-		ExternalDependency other = (ExternalDependency) obj;
-		if (entries == null) {
-			if (other.entries != null)
-				return false;
-		} else if (!entries.equals(other.entries))
-			return false;
-		if (includesMainArchive != other.includesMainArchive)
-			return false;
-		if (kinds == null) {
-			if (other.kinds != null)
-				return false;
-		} else if (!kinds.equals(other.kinds))
-			return false;
-		if (metaData == null) {
-			if (other.metaData != null)
-				return false;
-		} else if (!metaData.equals(other.metaData))
-			return false;
-		return true;
-	}
-
-	@Override
-	public String toString() {
-		return getClass().getSimpleName() + "[" + (!ObjectUtils.isNullOrEmpty(kinds) ? "kinds=" + kinds + ", " : "")
-				+ (!ObjectUtils.isNullOrEmpty(metaData) ? "metaData=" + metaData + ", " : "")
-				+ (!ObjectUtils.isNullOrEmpty(entries) ? "entries=" + entries + ", " : "") + "includesMainArchive="
-				+ includesMainArchive + "]";
 	}
 
 }
