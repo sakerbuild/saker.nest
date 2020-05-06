@@ -1214,12 +1214,17 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			if (extdependencies.isEmpty()) {
 				externaldependencyclassloaders = Collections.emptySet();
 			} else {
+				Set<ExternalDependency> depbuffer = new LinkedHashSet<>();
 				//TODO parallelize this
 				Set<NestRepositoryExternalArchiveClassLoader> extclassloaderdomain = new LinkedHashSet<>();
 				externaldependencyclassloaders = new LinkedHashSet<>();
 				for (Entry<URI, ? extends ExternalDependencyList> entry : extdependencies.getDependencies()
 						.entrySet()) {
+					depbuffer.clear();
 					ExternalDependencyList deplist = entry.getValue();
+					URI uri = entry.getKey();
+					Path archivepath = getExternalArchivePath(uri, deplist);
+
 					for (ExternalDependency extdep : deplist.getDependencies()) {
 						if (DependencyUtils.isDependencyConstraintExcludes(constraintConfiguration, extdep)) {
 							continue;
@@ -1228,18 +1233,17 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 						if (!kinds.contains(BundleInformation.DEPENDENCY_KIND_CLASSPATH)) {
 							continue;
 						}
-						URI uri = entry.getKey();
-						Path archivepath = getExternalArchivePath(uri, deplist);
-						//TODO check for multiple classpath kind occurrences, and make it non private if there is at least one non private
 
+						depbuffer.add(extdep);
+					}
+					if (!depbuffer.isEmpty()) {
 						try {
 							AbstractExternalArchive extarchive = loadExternalArchive(uri, archivepath);
-							Set<WildcardPath> depentries = extdep.getEntries();
-							boolean privatedep = extdep.isPrivate();
+							boolean privatedep = isAllPrivateDependencies(depbuffer);
 
-							if (!ObjectUtils.isNullOrEmpty(depentries)) {
+							if (hasNonEmptyEntriesDependency(depbuffer)) {
 								for (String ename : extarchive.getEntryNames()) {
-									if (includesEntryName(ename, depentries)) {
+									if (includesEntryName(ename, depbuffer)) {
 										try {
 											AbstractExternalArchive embeddedarchive = loadEmbeddedArchive(extarchive,
 													ename, archivepath);
@@ -1256,7 +1260,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 									}
 								}
 							}
-							if (extdep.isIncludesMainArchive()) {
+							if (isMainArchiveIncluded(depbuffer)) {
 								NestRepositoryExternalArchiveClassLoader extcl = new NestRepositoryExternalArchiveClassLoader(
 										parentcl, extarchive, extclassloaderdomain);
 								extclassloaderdomain.add(extcl);
@@ -1268,8 +1272,6 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 							throw new BundleDependencyUnsatisfiedException("Failed to load external dependency: " + uri,
 									e);
 						}
-
-						break;
 					}
 				}
 			}
@@ -1304,6 +1306,33 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 
 		domainClassLoaders.putAll(constructeddomaincls);
 		return result;
+	}
+
+	private static boolean hasNonEmptyEntriesDependency(Iterable<? extends ExternalDependency> deps) {
+		for (ExternalDependency dep : deps) {
+			if (!ObjectUtils.isNullOrEmpty(dep.getEntries())) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static boolean isMainArchiveIncluded(Iterable<? extends ExternalDependency> deps) {
+		for (ExternalDependency dep : deps) {
+			if (dep.isIncludesMainArchive()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static boolean isAllPrivateDependencies(Iterable<? extends ExternalDependency> deps) {
+		for (ExternalDependency dep : deps) {
+			if (!dep.isPrivate()) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	private AbstractExternalArchive loadEmbeddedArchive(AbstractExternalArchive extarchive, String ename,
@@ -1379,10 +1408,16 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 		return extarchive;
 	}
 
-	private static boolean includesEntryName(String name, Set<WildcardPath> wildcards) {
-		for (WildcardPath wc : wildcards) {
-			if (wc.includes(name)) {
-				return true;
+	private static boolean includesEntryName(String name, Set<ExternalDependency> deps) {
+		for (ExternalDependency dep : deps) {
+			Set<WildcardPath> entries = dep.getEntries();
+			if (ObjectUtils.isNullOrEmpty(entries)) {
+				continue;
+			}
+			for (WildcardPath wc : entries) {
+				if (wc.includes(name)) {
+					return true;
+				}
 			}
 		}
 		return false;
