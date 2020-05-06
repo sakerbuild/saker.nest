@@ -38,7 +38,7 @@ public final class ExternalDependency implements Externalizable {
 	private NavigableSet<String> kinds;
 	private Map<String, String> metaData;
 	private NavigableSet<WildcardPath> entries;
-	private boolean includesEnclosingArchive;
+	private boolean includesMainArchive;
 
 	/**
 	 * For {@link Externalizable}.
@@ -68,8 +68,8 @@ public final class ExternalDependency implements Externalizable {
 		return entries;
 	}
 
-	public boolean isIncludesEnclosingArchive() {
-		return includesEnclosingArchive;
+	public boolean isIncludesMainArchive() {
+		return includesMainArchive;
 	}
 
 	public boolean isPrivate() {
@@ -94,7 +94,7 @@ public final class ExternalDependency implements Externalizable {
 		private NavigableSet<String> kinds = new TreeSet<>();
 		private Map<String, String> metaData;
 		private NavigableSet<WildcardPath> entries;
-		private boolean includesEnclosingArchive;
+		private boolean includesMainArchive;
 
 		Builder() {
 		}
@@ -134,8 +134,8 @@ public final class ExternalDependency implements Externalizable {
 			return this;
 		}
 
-		public void setIncludesEnclosingArchive(boolean includesEnclosingArchive) {
-			this.includesEnclosingArchive = includesEnclosingArchive;
+		public void setIncludesMainArchive(boolean includesMainArchive) {
+			this.includesMainArchive = includesMainArchive;
 		}
 
 		public ExternalDependency build() {
@@ -148,7 +148,7 @@ public final class ExternalDependency implements Externalizable {
 					: ImmutableUtils.makeImmutableLinkedHashMap(metaData);
 			result.entries = entries == null ? Collections.emptyNavigableSet()
 					: ImmutableUtils.makeImmutableNavigableSet(entries);
-			result.includesEnclosingArchive = includesEnclosingArchive || ObjectUtils.isNullOrEmpty(result.entries);
+			result.includesMainArchive = includesMainArchive || ObjectUtils.isNullOrEmpty(result.entries);
 			return result;
 		}
 	}
@@ -158,7 +158,7 @@ public final class ExternalDependency implements Externalizable {
 		SerialUtils.writeExternalCollection(out, kinds);
 		SerialUtils.writeExternalCollection(out, entries);
 		SerialUtils.writeExternalMap(out, metaData);
-		out.writeBoolean(includesEnclosingArchive);
+		out.writeBoolean(includesMainArchive);
 	}
 
 	@Override
@@ -166,7 +166,7 @@ public final class ExternalDependency implements Externalizable {
 		kinds = SerialUtils.readExternalImmutableNavigableSet(in);
 		entries = SerialUtils.readExternalImmutableNavigableSet(in);
 		metaData = SerialUtils.readExternalImmutableLinkedHashMap(in);
-		includesEnclosingArchive = in.readBoolean();
+		includesMainArchive = in.readBoolean();
 	}
 
 	@Override
@@ -174,7 +174,7 @@ public final class ExternalDependency implements Externalizable {
 		final int prime = 31;
 		int result = 1;
 		result = prime * result + ((entries == null) ? 0 : entries.hashCode());
-		result = prime * result + (includesEnclosingArchive ? 1231 : 1237);
+		result = prime * result + (includesMainArchive ? 1231 : 1237);
 		result = prime * result + ((kinds == null) ? 0 : kinds.hashCode());
 		result = prime * result + ((metaData == null) ? 0 : metaData.hashCode());
 		return result;
@@ -194,7 +194,7 @@ public final class ExternalDependency implements Externalizable {
 				return false;
 		} else if (!entries.equals(other.entries))
 			return false;
-		if (includesEnclosingArchive != other.includesEnclosingArchive)
+		if (includesMainArchive != other.includesMainArchive)
 			return false;
 		if (kinds == null) {
 			if (other.kinds != null)
@@ -213,8 +213,8 @@ public final class ExternalDependency implements Externalizable {
 	public String toString() {
 		return getClass().getSimpleName() + "[" + (!ObjectUtils.isNullOrEmpty(kinds) ? "kinds=" + kinds + ", " : "")
 				+ (!ObjectUtils.isNullOrEmpty(metaData) ? "metaData=" + metaData + ", " : "")
-				+ (!ObjectUtils.isNullOrEmpty(entries) ? "entries=" + entries + ", " : "") + "includesEnclosingArchive="
-				+ includesEnclosingArchive + "]";
+				+ (!ObjectUtils.isNullOrEmpty(entries) ? "entries=" + entries + ", " : "") + "includesMainArchive="
+				+ includesMainArchive + "]";
 	}
 
 }

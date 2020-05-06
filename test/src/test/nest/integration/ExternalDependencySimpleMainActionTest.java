@@ -32,7 +32,7 @@ import testing.saker.nest.TestFlag;
 import testing.saker.nest.util.NestIntegrationTestUtils;
 
 @SakerTest
-public class ExternalDepSimpleMainActionTest extends ManualLoadedRepositoryTestCase {
+public class ExternalDependencySimpleMainActionTest extends ManualLoadedRepositoryTestCase {
 	//just a random uuid
 	private static final String PROPERTY_NAME = "c64803d1-ccc5-42fb-a4a2-9e8f41bda786";
 

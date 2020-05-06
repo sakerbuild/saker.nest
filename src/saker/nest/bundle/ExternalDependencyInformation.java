@@ -173,7 +173,7 @@ public final class ExternalDependencyInformation implements Externalizable {
 										"Failed to parse entries: " + wc + " at line: " + it.getLineNumber());
 							}
 							if (WILDCARD_SLASH.equals(wcpath)) {
-								builder.setIncludesEnclosingArchive(true);
+								builder.setIncludesMainArchive(true);
 							} else {
 								builder.addEntry(wcpath);
 							}
@@ -344,7 +344,7 @@ public final class ExternalDependencyInformation implements Externalizable {
 									"Failed to parse entries: " + wc + " at line: " + it.getLineNumber());
 						}
 						if (WILDCARD_SLASH.equals(wcpath)) {
-							builder.setIncludesEnclosingArchive(true);
+							builder.setIncludesMainArchive(true);
 						} else {
 							builder.addEntry(wcpath);
 						}

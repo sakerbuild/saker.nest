@@ -826,8 +826,8 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		}
 		SeekableByteChannel channel = bundle.getChannel();
 		if (channel == null) {
-			throw new BundleLoadingFailedException("Failed to verify bundle: " + bundle.getBundleIdentifier()
-					+ ", no exclusive file channel available. Concurrent file modifications cannot be prevented.");
+			throw new BundleLoadingFailedException(
+					"Failed to verify bundle: " + bundle.getBundleIdentifier() + ", no file channel available.");
 		}
 		try {
 			Signature signature;
@@ -851,6 +851,8 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 						"Failed to verify, invalid bundle signature: " + bundle.getBundleIdentifier());
 			}
 			return;
+		} catch (BundleLoadingFailedException e) {
+			throw e;
 		} catch (Exception e) {
 			throw new BundleLoadingFailedException("Failed to verify bundle signature: " + bundle.getBundleIdentifier(),
 					e);

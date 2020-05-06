@@ -18,6 +18,7 @@ package testing.saker.nest.util;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.security.KeyPair;
@@ -35,6 +36,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
+import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 
 import saker.build.file.StreamWritable;
@@ -47,6 +49,7 @@ import saker.build.file.provider.SakerFileProvider;
 import saker.build.runtime.execution.ExecutionParametersImpl;
 import saker.build.thirdparty.saker.util.ObjectUtils;
 import saker.build.thirdparty.saker.util.ReflectUtils;
+import saker.build.thirdparty.saker.util.StringUtils;
 import saker.build.thirdparty.saker.util.io.ByteArrayRegion;
 import saker.build.thirdparty.saker.util.io.ByteSink;
 import saker.build.thirdparty.saker.util.io.ByteSource;
@@ -110,6 +113,17 @@ public class NestIntegrationTestUtils {
 			entries.put(SakerPath.valueOf(c.getName().replace('.', '/') + ".class"),
 					ReflectUtils.getClassBytesUsingClassLoader(c));
 		}
+	}
+
+	@SafeVarargs
+	public static <S> void addServices(Map<SakerPath, ByteArrayRegion> entries, Class<S> serviceclass,
+			Class<?>... classes) {
+		SakerPath servicefilepath = SakerPath.valueOf("META-INF/services/" + serviceclass.getName());
+		entries.put(servicefilepath,
+				ByteArrayRegion.wrap(StringUtils
+						.toStringJoin("\n",
+								Stream.of(classes).map(c -> c.asSubclass(serviceclass)).map(Class::getName).iterator())
+						.getBytes(StandardCharsets.UTF_8)));
 	}
 
 	public static StreamWritable createStreamWritableJarFromDirectoryWithClasses(SakerFileProvider fp,

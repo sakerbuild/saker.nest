@@ -1256,7 +1256,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 									}
 								}
 							}
-							if (extdep.isIncludesEnclosingArchive()) {
+							if (extdep.isIncludesMainArchive()) {
 								NestRepositoryExternalArchiveClassLoader extcl = new NestRepositoryExternalArchiveClassLoader(
 										parentcl, extarchive, extclassloaderdomain);
 								extclassloaderdomain.add(extcl);
