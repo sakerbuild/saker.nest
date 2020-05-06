@@ -92,7 +92,7 @@ import saker.nest.bundle.BundleIdentifier;
 import saker.nest.bundle.BundleInformation;
 import saker.nest.bundle.BundleUtils;
 import saker.nest.bundle.ExternalDependencyInformation;
-import saker.nest.bundle.ExternalDependencyList;
+import saker.nest.bundle.Hashes;
 import saker.nest.bundle.JarNestRepositoryBundleImpl;
 import saker.nest.bundle.NestRepositoryBundle;
 import saker.nest.exc.BundleLoadingFailedException;
@@ -977,18 +977,15 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 	}
 
 	private JarNestRepositoryBundleImpl createBundle(Path resultjarpath) throws IOException {
-		//require that any external dependencies have sha-256 defined for them
+		//require that all external dependencies have sha-256 defined for them
 
 		JarNestRepositoryBundleImpl result = JarNestRepositoryBundleImpl.create(this, resultjarpath);
 		BundleInformation info = result.getInformation();
 		ExternalDependencyInformation extdeps = info.getExternalDependencyInformation();
-		if (!extdeps.isEmpty()) {
-			for (Entry<URI, ? extends ExternalDependencyList> entry : extdeps.getDependencies().entrySet()) {
-				ExternalDependencyList deplist = entry.getValue();
-				if (deplist.getSha256Hash() == null) {
-					throw new InvalidNestBundleException("Bundle " + info.getBundleIdentifier()
-							+ " declares external dependency without SHA-256 hash value: " + entry.getKey());
-				}
+		for (Entry<URI, Hashes> entry : BundleUtils.getExternalDependencyInformationHashes(extdeps).entrySet()) {
+			if (entry.getValue().sha256 == null) {
+				throw new InvalidNestBundleException("Bundle " + info.getBundleIdentifier()
+						+ " declares external dependency without SHA-256 hash value: " + entry.getKey());
 			}
 		}
 		return result;

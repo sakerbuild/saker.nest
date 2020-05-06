@@ -75,7 +75,6 @@ import saker.build.thirdparty.saker.util.io.StreamUtils;
 import saker.build.thirdparty.saker.util.io.function.IOSupplier;
 import saker.build.util.java.JavaTools;
 import saker.nest.NestRepositoryImpl.ExternalArchiveReference;
-import saker.nest.NestRepositoryImpl.Hashes;
 import saker.nest.bundle.AbstractNestRepositoryBundle;
 import saker.nest.bundle.BundleDependency;
 import saker.nest.bundle.BundleDependencyInformation;
@@ -88,6 +87,7 @@ import saker.nest.bundle.DependencyConstraintConfiguration;
 import saker.nest.bundle.ExternalDependency;
 import saker.nest.bundle.ExternalDependencyInformation;
 import saker.nest.bundle.ExternalDependencyList;
+import saker.nest.bundle.Hashes;
 import saker.nest.bundle.JarExternalArchiveImpl;
 import saker.nest.bundle.NestBundleStorageConfiguration;
 import saker.nest.bundle.NestRepositoryBundle;
@@ -1222,12 +1222,15 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 				//TODO parallelize this
 				Set<NestRepositoryExternalArchiveClassLoader> extclassloaderdomain = new LinkedHashSet<>();
 				externaldependencyclassloaders = new LinkedHashSet<>();
+				NavigableMap<URI, Hashes> urihashes = BundleUtils
+						.getExternalDependencyInformationHashes(extdependencies);
 				for (Entry<URI, ? extends ExternalDependencyList> entry : extdependencies.getDependencies()
 						.entrySet()) {
 					depbuffer.clear();
 					ExternalDependencyList deplist = entry.getValue();
 					URI uri = entry.getKey();
-					Path archivepath = getExternalArchivePath(uri, deplist);
+					Hashes urihash = urihashes.get(uri);
+					Path archivepath = getExternalArchivePath(uri, urihash);
 
 					for (ExternalDependency extdep : deplist.getDependencies()) {
 						if (DependencyUtils.isDependencyConstraintExcludes(constraintConfiguration, extdep)) {
@@ -1242,25 +1245,21 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 					}
 					if (!depbuffer.isEmpty()) {
 						try {
-							String depsha256 = deplist.getSha256Hash();
-							String depsha1 = deplist.getSha1Hash();
-							String depmd5 = deplist.getMd5Hash();
-							ExternalArchiveReference extarchive = loadExternalArchive(uri, archivepath,
-									new Hashes(depsha256, depsha1, depmd5));
-							if (depsha256 != null && !depsha256.equals(extarchive.hashes.sha256)) {
+							ExternalArchiveReference extarchive = loadExternalArchive(uri, archivepath, urihash);
+							if (urihash.sha256 != null && !urihash.sha256.equals(extarchive.hashes.sha256)) {
 								throw new BundleDependencyUnsatisfiedException(
 										"Failed to load external dependency: " + uri + " (SHA-256 mismatch, expected: "
-												+ depsha256 + " actual: " + extarchive.hashes.sha256 + ")");
+												+ urihash.sha256 + " actual: " + extarchive.hashes.sha256 + ")");
 							}
-							if (depsha1 != null && !depsha1.equals(extarchive.hashes.sha1)) {
+							if (urihash.sha1 != null && !urihash.sha1.equals(extarchive.hashes.sha1)) {
 								throw new BundleDependencyUnsatisfiedException(
 										"Failed to load external dependency: " + uri + " (SHA-1 mismatch, expected: "
-												+ depsha1 + " actual: " + extarchive.hashes.sha1 + ")");
+												+ urihash.sha1 + " actual: " + extarchive.hashes.sha1 + ")");
 							}
-							if (depmd5 != null && !depmd5.equals(extarchive.hashes.md5)) {
+							if (urihash.md5 != null && !urihash.md5.equals(extarchive.hashes.md5)) {
 								throw new BundleDependencyUnsatisfiedException(
 										"Failed to load external dependency: " + uri + " (MD5 mismatch, expected: "
-												+ depmd5 + " actual: " + extarchive.hashes.md5 + ")");
+												+ urihash.md5 + " actual: " + extarchive.hashes.md5 + ")");
 							}
 							boolean privatedep = isAllPrivateDependencies(depbuffer);
 
@@ -1524,20 +1523,19 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 		return false;
 	}
 
-	private Path getExternalArchivePath(URI uri, ExternalDependencyList deplist) {
+	private Path getExternalArchivePath(URI uri, Hashes hash) {
 		Path path = repository.getRepositoryStorageDirectory().resolve(STORAGE_DIRECTORY_NAME_EXTERNAL_ARCHIVES)
 				.resolve(sha256(uri));
-		String sha256hash = deplist.getSha256Hash();
-		if (sha256hash != null) {
-			path = path.resolve(sha256hash);
-		} else {
-			String sha1hash = deplist.getSha1Hash();
-			if (sha1hash != null) {
-				path = path.resolve("sha1-" + sha256hash);
+		if (hash != null) {
+			if (hash.sha256 != null) {
+				path = path.resolve(hash.sha256);
 			} else {
-				String md5hash = deplist.getMd5Hash();
-				if (md5hash != null) {
-					path = path.resolve("md5-" + sha256hash);
+				if (hash.sha1 != null) {
+					path = path.resolve("sha1-" + hash.sha256);
+				} else {
+					if (hash.md5 != null) {
+						path = path.resolve("md5-" + hash.sha256);
+					}
 				}
 			}
 		}

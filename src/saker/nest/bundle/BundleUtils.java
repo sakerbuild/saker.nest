@@ -18,16 +18,21 @@ package saker.nest.bundle;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.net.URI;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.Collections;
 import java.util.Enumeration;
+import java.util.Map.Entry;
+import java.util.NavigableMap;
 import java.util.NavigableSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
@@ -235,6 +240,62 @@ public class BundleUtils {
 			throw new IllegalArchiveEntryNameException(
 					"Illegal archive entry name: " + ename + " (path separators ; and : are not allowed)");
 		}
+	}
+
+	public static NavigableMap<URI, Hashes> getExternalDependencyInformationHashes(
+			ExternalDependencyInformation depinfo) {
+		if (depinfo.isEmpty()) {
+			return Collections.emptyNavigableMap();
+		}
+		NavigableMap<URI, Hashes> result = new TreeMap<>();
+		for (Entry<URI, ? extends ExternalDependencyList> entry : depinfo.getDependencies().entrySet()) {
+			ExternalDependencyList deplist = entry.getValue();
+			result.compute(entry.getKey(), (uri, v) -> {
+				return merge(v, new Hashes(deplist.getSha256Hash(), deplist.getSha1Hash(), deplist.getMd5Hash()), uri);
+			});
+			for (Entry<URI, ExternalAttachmentInformation> attachmententry : deplist.getSourceAttachments().entrySet()) {
+				ExternalAttachmentInformation attachmentinfo = attachmententry.getValue();
+				result.compute(attachmententry.getKey(), (uri, v) -> {
+					return merge(v, new Hashes(attachmentinfo.getSha256Hash(), attachmentinfo.getSha1Hash(),
+							attachmentinfo.getMd5Hash()), uri);
+				});
+			}
+			for (Entry<URI, ExternalAttachmentInformation> attachmententry : deplist.getDocumentationAttachments()
+					.entrySet()) {
+				ExternalAttachmentInformation attachmentinfo = attachmententry.getValue();
+				result.compute(attachmententry.getKey(), (uri, v) -> {
+					return merge(v, new Hashes(attachmentinfo.getSha256Hash(), attachmentinfo.getSha1Hash(),
+							attachmentinfo.getMd5Hash()), uri);
+				});
+			}
+		}
+
+		return result;
+	}
+
+	private static Hashes merge(Hashes first, Hashes second, Object context) {
+		if (first == null) {
+			return second;
+		}
+		if (second == null) {
+			return first;
+		}
+		return new Hashes(mergeHash(first.sha256, second.sha256, "SHA-256", context),
+				mergeHash(first.sha1, second.sha1, "SHA-1", context), mergeHash(first.md5, second.md5, "MD5", context));
+	}
+
+	private static String mergeHash(String first, String second, String name, Object context) {
+		if (first == null) {
+			return second;
+		}
+		if (second == null) {
+			return first;
+		}
+		if (first.equals(second)) {
+			return first;
+		}
+		throw new IllegalArgumentException(
+				"Conflicing " + name + " hash declarations for: " + context + " with " + first + " and " + second);
 	}
 
 	private BundleUtils() {

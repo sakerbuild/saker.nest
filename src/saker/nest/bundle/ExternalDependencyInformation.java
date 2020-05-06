@@ -75,7 +75,11 @@ public final class ExternalDependencyInformation implements Externalizable {
 				thisdependencies.put(uri, dlist);
 			}
 		}
-		return new ExternalDependencyInformation(ImmutableUtils.unmodifiableMap(dependencies));
+		ExternalDependencyInformation result = new ExternalDependencyInformation(
+				ImmutableUtils.unmodifiableMap(dependencies));
+		//validate hash declarations
+		BundleUtils.getExternalDependencyInformationHashes(result);
+		return result;
 	}
 
 	public Map<URI, ? extends ExternalDependencyList> getDependencies() {

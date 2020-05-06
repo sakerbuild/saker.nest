@@ -81,6 +81,8 @@ public class BundleExternalDependenciesFileUnitTest extends SakerTestCase {
 				.next().getSha1Hash(), "12345678901234567890123456789012abcdef12");
 		assertEquals(attachmentshash.getDependencies().get(examplemyjar).getSourceAttachments().values().iterator()
 				.next().getMd5Hash(), "12345678901234567890123456789012");
+
+		assertException(IllegalArgumentException.class, () -> read("conflictinghashes.txt"));
 	}
 
 	private static <T> T atIndex(Iterable<T> iterable, int idx) {
