@@ -115,7 +115,6 @@ public class NestIntegrationTestUtils {
 		}
 	}
 
-	@SafeVarargs
 	public static <S> void addServices(Map<SakerPath, ByteArrayRegion> entries, Class<S> serviceclass,
 			Class<?>... classes) {
 		SakerPath servicefilepath = SakerPath.valueOf("META-INF/services/" + serviceclass.getName());

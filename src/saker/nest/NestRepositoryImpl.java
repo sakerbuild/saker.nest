@@ -16,9 +16,12 @@
 package saker.nest;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -39,6 +42,7 @@ import saker.build.thirdparty.saker.util.function.Functionals;
 import saker.build.thirdparty.saker.util.io.FileUtils;
 import saker.build.thirdparty.saker.util.io.IOUtils;
 import saker.build.thirdparty.saker.util.io.SerialUtils;
+import saker.build.thirdparty.saker.util.io.StreamUtils;
 import saker.nest.bundle.AbstractExternalArchive;
 import saker.nest.bundle.storage.AbstractBundleStorage;
 import saker.nest.bundle.storage.AbstractStorageKey;
@@ -57,7 +61,7 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 	private final Map<AbstractStorageKey, AbstractBundleStorage> loadedStorages = new ConcurrentHashMap<>();
 
 	final ConcurrentSkipListMap<Path, Object> externalArchiveLoadLocks = new ConcurrentSkipListMap<>();
-	final ConcurrentSkipListMap<Path, AbstractExternalArchive> externalArchives = new ConcurrentSkipListMap<>();
+	final ConcurrentSkipListMap<Path, ExternalArchiveReference> externalArchives = new ConcurrentSkipListMap<>();
 
 	public NestRepositoryImpl(RepositoryEnvironment environment) {
 		this.repositoryEnvironment = environment;
@@ -157,7 +161,10 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 		loadedStorages.clear();
 		for (Entry<Path, Object> lockentry : externalArchiveLoadLocks.entrySet()) {
 			synchronized (lockentry.getValue()) {
-				exc = IOUtils.closeExc(exc, externalArchives.remove(lockentry.getKey()));
+				ExternalArchiveReference archiveref = externalArchives.remove(lockentry.getKey());
+				if (archiveref != null) {
+					exc = IOUtils.closeExc(exc, archiveref.archive);
+				}
 			}
 		}
 
@@ -176,6 +183,111 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 	String getCoreClassLoaderResolverId(String buildrepositoryid) {
 		return buildrepositoryid + "/" + NestRepositoryFactory.IDENTIFIER + ".repository."
 				+ Versions.VERSION_STRING_FULL + "/" + StringUtils.toHexString(repositoryHash);
+	}
+
+	public static class ExternalArchiveReference {
+		public final AbstractExternalArchive archive;
+		public final Hashes hashes;
+
+		private final ConcurrentSkipListMap<String, Hashes> entryHashes = new ConcurrentSkipListMap<>();
+
+		public ExternalArchiveReference(AbstractExternalArchive archive, Hashes hashes) {
+			this.archive = archive;
+			this.hashes = hashes;
+		}
+
+		public Hashes getEntryHash(String name) throws IOException {
+			Hashes hashes = entryHashes.get(name);
+			if (hashes != null) {
+				return hashes;
+			}
+			MessageDigest sha1;
+			MessageDigest sha256;
+			MessageDigest md5;
+			try {
+				md5 = MessageDigest.getInstance("MD5");
+				sha256 = MessageDigest.getInstance("SHA-256");
+				sha1 = MessageDigest.getInstance("SHA-1");
+			} catch (NoSuchAlgorithmException e) {
+				throw new IOException("Failed to retrieve hashing algorithm.", e);
+			}
+			try (InputStream is = archive.openEntry(name)) {
+				byte[] buffer = new byte[StreamUtils.DEFAULT_BUFFER_SIZE];
+				for (int read; (read = is.read(buffer)) > 0;) {
+					sha256.update(buffer, 0, read);
+					sha1.update(buffer, 0, read);
+					md5.update(buffer, 0, read);
+				}
+			}
+			hashes = new Hashes(StringUtils.toHexString(sha256.digest()), StringUtils.toHexString(sha1.digest()),
+					StringUtils.toHexString(md5.digest()));
+			Hashes prev = entryHashes.putIfAbsent(name, hashes);
+			if (prev != null) {
+				return prev;
+			}
+			return hashes;
+		}
+
+		public void putEntryHash(String name, Hashes hashes) {
+			entryHashes.putIfAbsent(name, hashes);
+		}
+
+	}
+
+	public static class Hashes {
+		public final String sha256;
+		public final String sha1;
+		public final String md5;
+
+		public Hashes(String sha256, String sha1, String md5) {
+			this.sha256 = sha256;
+			this.sha1 = sha1;
+			this.md5 = md5;
+		}
+
+		@Override
+		public int hashCode() {
+			final int prime = 31;
+			int result = 1;
+			result = prime * result + ((md5 == null) ? 0 : md5.hashCode());
+			result = prime * result + ((sha1 == null) ? 0 : sha1.hashCode());
+			result = prime * result + ((sha256 == null) ? 0 : sha256.hashCode());
+			return result;
+		}
+
+		@Override
+		public boolean equals(Object obj) {
+			if (this == obj)
+				return true;
+			if (obj == null)
+				return false;
+			if (getClass() != obj.getClass())
+				return false;
+			Hashes other = (Hashes) obj;
+			if (md5 == null) {
+				if (other.md5 != null)
+					return false;
+			} else if (!md5.equals(other.md5))
+				return false;
+			if (sha1 == null) {
+				if (other.sha1 != null)
+					return false;
+			} else if (!sha1.equals(other.sha1))
+				return false;
+			if (sha256 == null) {
+				if (other.sha256 != null)
+					return false;
+			} else if (!sha256.equals(other.sha256))
+				return false;
+			return true;
+		}
+
+		@Override
+		public String toString() {
+			return "Hashes[" + (sha256 != null ? "sha256=" + sha256 + ", " : "")
+					+ (sha1 != null ? "sha1=" + sha1 + ", " : "") + (md5 != null ? "md5=" + md5 : "") + "]";
+		}
+
 	}
 
 }

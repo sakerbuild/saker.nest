@@ -61,6 +61,10 @@ public class JarExternalArchiveImpl extends AbstractExternalArchive {
 		}
 	}
 
+	public SeekableByteChannel getChannel() {
+		return channel;
+	}
+
 	@Override
 	public NavigableSet<String> getEntryNames() {
 		return entryNames.get();
