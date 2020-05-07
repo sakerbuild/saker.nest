@@ -980,13 +980,19 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		//require that all external dependencies have sha-256 defined for them
 
 		JarNestRepositoryBundleImpl result = JarNestRepositoryBundleImpl.create(this, resultjarpath);
-		BundleInformation info = result.getInformation();
-		ExternalDependencyInformation extdeps = info.getExternalDependencyInformation();
-		for (Entry<URI, Hashes> entry : BundleUtils.getExternalDependencyInformationHashes(extdeps).entrySet()) {
-			if (entry.getValue().sha256 == null) {
-				throw new InvalidNestBundleException("Bundle " + info.getBundleIdentifier()
-						+ " declares external dependency without SHA-256 hash value: " + entry.getKey());
+		try {
+			BundleInformation info = result.getInformation();
+			ExternalDependencyInformation extdeps = info.getExternalDependencyInformation();
+			for (Entry<URI, Hashes> entry : BundleUtils.getExternalDependencyInformationHashes(extdeps).entrySet()) {
+				if (entry.getValue().sha256 == null) {
+					throw new InvalidNestBundleException("Bundle " + info.getBundleIdentifier()
+							+ " declares external dependency without SHA-256 hash value: " + entry.getKey());
+				}
 			}
+		} catch (Throwable e) {
+			//close the jar in case of exceptions
+			IOUtils.addExc(e, IOUtils.closeExc(result));
+			throw e;
 		}
 		return result;
 	}
