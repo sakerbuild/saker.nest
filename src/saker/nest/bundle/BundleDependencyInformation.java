@@ -100,13 +100,22 @@ public final class BundleDependencyInformation implements Externalizable {
 		LinkedHashMap<BundleIdentifier, BundleDependencyList> thisdependencies = new LinkedHashMap<>();
 		for (Entry<BundleIdentifier, ? extends BundleDependencyList> entry : dependencies.entrySet()) {
 			BundleIdentifier bundleid = entry.getKey();
+			if (bundleid == null) {
+				throw new NullPointerException("Null bundle id.");
+			}
 			if (bundleid.getVersionQualifier() != null) {
 				throw new IllegalArgumentException(
 						"Dependency bundle identifier cannot have version qualifier: " + bundleid);
 			}
 			BundleDependencyList dlist = entry.getValue();
+			if (dlist == null) {
+				throw new NullPointerException("Null dependency list for: " + bundleid);
+			}
 			if (!dlist.isEmpty()) {
-				thisdependencies.put(bundleid, dlist);
+				BundleDependencyList prev = thisdependencies.putIfAbsent(bundleid, dlist);
+				if (prev != null) {
+					throw new IllegalArgumentException("Duplicate bundle dependencies: " + bundleid);
+				}
 			}
 		}
 		return new BundleDependencyInformation(ImmutableUtils.unmodifiableMap(thisdependencies));

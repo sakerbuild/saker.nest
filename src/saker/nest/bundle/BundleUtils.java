@@ -20,11 +20,14 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.channels.SeekableByteChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.Map.Entry;
@@ -41,6 +44,7 @@ import java.util.zip.ZipEntry;
 import saker.build.task.TaskName;
 import saker.build.thirdparty.saker.util.ImmutableUtils;
 import saker.build.thirdparty.saker.util.ObjectUtils;
+import saker.build.thirdparty.saker.util.StringUtils;
 import saker.build.thirdparty.saker.util.classloader.MultiClassLoader;
 import saker.build.thirdparty.saker.util.io.ByteArrayRegion;
 import saker.build.thirdparty.saker.util.io.UnsyncByteArrayOutputStream;
@@ -253,7 +257,8 @@ public class BundleUtils {
 			result.compute(entry.getKey(), (uri, v) -> {
 				return merge(v, new Hashes(deplist.getSha256Hash(), deplist.getSha1Hash(), deplist.getMd5Hash()), uri);
 			});
-			for (Entry<URI, ExternalAttachmentInformation> attachmententry : deplist.getSourceAttachments().entrySet()) {
+			for (Entry<URI, ExternalAttachmentInformation> attachmententry : deplist.getSourceAttachments()
+					.entrySet()) {
 				ExternalAttachmentInformation attachmentinfo = attachmententry.getValue();
 				result.compute(attachmententry.getKey(), (uri, v) -> {
 					return merge(v, new Hashes(attachmentinfo.getSha256Hash(), attachmentinfo.getSha1Hash(),
@@ -296,6 +301,17 @@ public class BundleUtils {
 		}
 		throw new IllegalArgumentException(
 				"Conflicing " + name + " hash declarations for: " + context + " with " + first + " and " + second);
+	}
+
+	public static String sha256(URI uri) {
+		try {
+			//XXX reuse digest
+			MessageDigest digest = MessageDigest.getInstance("SHA-256");
+			digest.update(uri.toString().getBytes(StandardCharsets.UTF_8));
+			return StringUtils.toHexString(digest.digest());
+		} catch (NoSuchAlgorithmException e) {
+			throw new AssertionError(e);
+		}
 	}
 
 	private BundleUtils() {

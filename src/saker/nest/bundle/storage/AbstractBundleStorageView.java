@@ -16,6 +16,11 @@
 package saker.nest.bundle.storage;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URI;
+import java.net.URL;
+import java.net.URLConnection;
 import java.security.MessageDigest;
 import java.util.Map;
 import java.util.NavigableSet;
@@ -25,8 +30,10 @@ import saker.build.runtime.repository.TaskNotFoundException;
 import saker.build.task.TaskName;
 import saker.nest.bundle.AbstractNestRepositoryBundle;
 import saker.nest.bundle.BundleIdentifier;
+import saker.nest.bundle.Hashes;
 import saker.nest.bundle.NestRepositoryBundle;
 import saker.nest.exc.BundleLoadingFailedException;
+import testing.saker.nest.TestFlag;
 
 public abstract class AbstractBundleStorageView implements BundleStorageView {
 	public abstract Object detectChanges(ExecutionPathConfiguration pathconfig);
@@ -63,5 +70,24 @@ public abstract class AbstractBundleStorageView implements BundleStorageView {
 		} catch (IOException | TaskNotFoundException e) {
 			return null;
 		}
+	}
+
+	public InputStream openExternalDependencyURI(URI uri, Hashes expectedhashes) throws IOException {
+		URL url;
+		if (TestFlag.ENABLED) {
+			url = TestFlag.metric().toURL(uri);
+		} else {
+			url = uri.toURL();
+		}
+		URLConnection conn = url.openConnection();
+		if (conn instanceof HttpURLConnection) {
+			HttpURLConnection httpconn = (HttpURLConnection) conn;
+			httpconn.setRequestMethod("GET");
+			httpconn.setDoOutput(false);
+			httpconn.setDoInput(true);
+			httpconn.setConnectTimeout(10000);
+			httpconn.setReadTimeout(10000);
+		}
+		return conn.getInputStream();
 	}
 }

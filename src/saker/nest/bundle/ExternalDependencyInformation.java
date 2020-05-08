@@ -29,8 +29,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Map.Entry;
+import java.util.Objects;
 import java.util.regex.Pattern;
 
 import saker.build.file.path.SakerPath;
@@ -70,9 +70,18 @@ public final class ExternalDependencyInformation implements Externalizable {
 		LinkedHashMap<URI, ExternalDependencyList> thisdependencies = new LinkedHashMap<>();
 		for (Entry<URI, ? extends ExternalDependencyList> entry : dependencies.entrySet()) {
 			URI uri = entry.getKey();
+			if (uri == null) {
+				throw new NullPointerException("Null external dependency uri.");
+			}
 			ExternalDependencyList dlist = entry.getValue();
+			if (dlist == null) {
+				throw new NullPointerException("Null dependency list for: " + uri);
+			}
 			if (!dlist.isEmpty()) {
-				thisdependencies.put(uri, dlist);
+				ExternalDependencyList prev = thisdependencies.putIfAbsent(uri, dlist);
+				if (prev != null) {
+					throw new IllegalArgumentException("Duplicate external dependency: " + uri);
+				}
 			}
 		}
 		ExternalDependencyInformation result = new ExternalDependencyInformation(

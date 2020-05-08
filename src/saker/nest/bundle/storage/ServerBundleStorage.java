@@ -18,6 +18,7 @@ package saker.nest.bundle.storage;
 import java.io.BufferedReader;
 import java.io.Closeable;
 import java.io.Externalizable;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -1837,6 +1838,41 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		@Override
 		public String getServerHost() {
 			return ServerBundleStorage.this.getServerHost();
+		}
+
+		@Override
+		public InputStream openExternalDependencyURI(URI uri, Hashes expectedhashes) throws IOException {
+			if (expectedhashes == null || expectedhashes.sha256 == null) {
+				throw new FileNotFoundException("Failed to download external dependency without SHA-256: " + uri);
+			}
+			String url = serverHost + "/external/mirror/" + BundleUtils.sha256(uri) + "/" + expectedhashes.sha256;
+			return makeServerRequest(offline, url, "GET", (rc, ins, errs, headerfunc) -> {
+				if (rc == HttpURLConnection.HTTP_OK) {
+					//HTTP OK
+					return ins.get();
+				}
+				IOException ee = null;
+				String errcontent = "";
+				try {
+					errcontent = StreamUtils.readStreamStringFully(errs.get());
+				} catch (IOException e) {
+					ee = e;
+				}
+				StringBuilder sb = new StringBuilder();
+				sb.append("Failed to download external dependency: ");
+				sb.append(uri);
+				sb.append(" from ");
+				sb.append(url);
+				sb.append(" Response code: ");
+				sb.append(rc);
+				if (!errcontent.isEmpty()) {
+					sb.append(" Response content: ");
+					sb.append(errcontent);
+				}
+				IOException exc = new IOException(sb.toString());
+				IOUtils.addExc(exc, ee);
+				throw exc;
+			});
 		}
 
 		@Override

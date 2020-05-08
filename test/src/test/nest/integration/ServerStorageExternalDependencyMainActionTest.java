@@ -18,8 +18,12 @@ package test.nest.integration;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -28,7 +32,10 @@ import saker.build.file.path.SakerPath;
 import saker.build.file.provider.LocalFileProvider;
 import saker.build.runtime.repository.SakerRepository;
 import saker.build.thirdparty.saker.util.ObjectUtils;
-import test.nest.util.ExternalArchiveResolvingNestMetric;
+import saker.build.thirdparty.saker.util.StringUtils;
+import saker.build.thirdparty.saker.util.io.ByteArrayRegion;
+import saker.build.thirdparty.saker.util.io.UnsyncByteArrayInputStream;
+import test.nest.util.BasicServerNestMetric;
 import testing.saker.SakerTest;
 import testing.saker.build.tests.EnvironmentTestCase;
 import testing.saker.build.tests.TestUtils;
@@ -38,18 +45,9 @@ import testing.saker.nest.util.NestIntegrationTestUtils;
 
 @SakerTest
 public class ServerStorageExternalDependencyMainActionTest extends ManualLoadedRepositoryTestCase {
-	//just a random uuid
-	private static final String PROPERTY_NAME = "8f0e5410-f540-48fb-88d4-cd07b40103a5";
-
 	public static class SimpleMain {
 		public static void main(String[] args) {
-			ExternalClass.main(args);
-		}
-	}
-
-	public static class ExternalClass {
-		public static void main(String[] args) {
-			System.setProperty(PROPERTY_NAME, args[0]);
+			ServerStorageExternalDependencyMainActionTestExternalClass.main(args);
 		}
 	}
 
@@ -76,28 +74,33 @@ public class ServerStorageExternalDependencyMainActionTest extends ManualLoadedR
 				.put("simple.bundle-v1", ObjectUtils.newHashSet(SimpleMain.class))//
 				.put("nohash.bundle-v1", ObjectUtils.newHashSet(SimpleMain.class))//
 				.build();
-		System.clearProperty(PROPERTY_NAME);
+		System.clearProperty(ServerStorageExternalDependencyMainActionTestExternalClass.PROPERTY_NAME);
 
 		NestIntegrationTestUtils.createAllJarsFromDirectoriesWithClasses(LocalFileProvider.getInstance(),
 				SakerPath.valueOf(workingDir).resolve("bundles"), bundleOutDir, bundleclasses);
 
 		repo.executeAction("main", "-Unest.repository.storage.configuration=[:server]",
 				"-Unest.server.url=https://testurl", "-bundle", "simple.bundle-v1", "first-server-arg");
-		assertEquals(System.clearProperty(PROPERTY_NAME), "first-server-arg");
+		assertEquals(System.clearProperty(ServerStorageExternalDependencyMainActionTestExternalClass.PROPERTY_NAME),
+				"first-server-arg");
 
 		assertException("saker.nest.exc.BundleLoadingFailedException",
 				() -> repo.executeAction("main", "-Unest.repository.storage.configuration=[:server]",
 						"-Unest.server.url=https://testurl", "-bundle", "nohash.bundle-v1", "first-server-arg"));
 	}
 
-	private final class NestMetricImplementation extends ExternalArchiveResolvingNestMetric {
+	private final class NestMetricImplementation extends BasicServerNestMetric {
+		private Map<String, ByteArrayRegion> externalBytes = new TreeMap<>();
 		{
 			try {
-				put("https://example.com/external.jar",
-						NestIntegrationTestUtils.createJarBytesWithClasses(setOf(ExternalClass.class)));
+				ByteArrayRegion bytes = NestIntegrationTestUtils.createJarBytesWithClasses(
+						setOf(ServerStorageExternalDependencyMainActionTestExternalClass.class));
+				externalBytes.put("https://testurl/external/mirror/"
+						+ sha256(new URI("https://example.com/external.jar")) + "/" + sha256(bytes), bytes);
 			} catch (Exception e) {
-				fail(e);
+				throw new AssertionError(e);
 			}
+			externalBytes.keySet().forEach(System.out::println);
 		}
 
 		@Override
@@ -106,6 +109,9 @@ public class ServerStorageExternalDependencyMainActionTest extends ManualLoadedR
 				return HttpURLConnection.HTTP_OK;
 			}
 			if ("https://testurl/bundle/download/nohash.bundle-v1".equals(requesturl)) {
+				return HttpURLConnection.HTTP_OK;
+			}
+			if (externalBytes.containsKey(requesturl)) {
 				return HttpURLConnection.HTTP_OK;
 			}
 			return super.getServerRequestResponseCode(requesturl);
@@ -119,9 +125,32 @@ public class ServerStorageExternalDependencyMainActionTest extends ManualLoadedR
 			if ("https://testurl/bundle/download/nohash.bundle-v1".equals(requesturl)) {
 				return Files.newInputStream(bundleOutDir.resolve("nohash.bundle-v1.jar"));
 			}
+			ByteArrayRegion bytes = externalBytes.get(requesturl);
+			if (bytes != null) {
+				return new UnsyncByteArrayInputStream(bytes);
+			}
 			return super.getServerRequestResponseStream(requesturl);
 		}
 
 	}
 
+	public static String sha256(URI uri) {
+		try {
+			MessageDigest digest = MessageDigest.getInstance("SHA-256");
+			digest.update(uri.toString().getBytes(StandardCharsets.UTF_8));
+			return StringUtils.toHexString(digest.digest());
+		} catch (NoSuchAlgorithmException e) {
+			throw new AssertionError(e);
+		}
+	}
+
+	public static String sha256(ByteArrayRegion bytes) {
+		try {
+			MessageDigest digest = MessageDigest.getInstance("SHA-256");
+			digest.update(bytes.getArray(), bytes.getOffset(), bytes.getLength());
+			return StringUtils.toHexString(digest.digest());
+		} catch (NoSuchAlgorithmException e) {
+			throw new AssertionError(e);
+		}
+	}
 }

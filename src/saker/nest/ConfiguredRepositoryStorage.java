@@ -23,13 +23,9 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
-import java.net.HttpURLConnection;
 import java.net.URI;
-import java.net.URL;
-import java.net.URLConnection;
 import java.nio.channels.Channels;
 import java.nio.channels.SeekableByteChannel;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -126,7 +122,6 @@ import saker.nest.thirdparty.org.json.JSONArray;
 import saker.nest.thirdparty.org.json.JSONObject;
 import saker.nest.utils.IdentityComparisonPair;
 import saker.nest.utils.NonSpaceIterator;
-import testing.saker.nest.TestFlag;
 
 public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorageConfiguration {
 	private static final String STORAGE_DIRECTORY_NAME_EXTERNAL_ARCHIVES = "external";
@@ -1245,7 +1240,8 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 					}
 					if (!depbuffer.isEmpty()) {
 						try {
-							ExternalArchiveReference extarchive = loadExternalArchive(uri, archivepath, urihash);
+							ExternalArchiveReference extarchive = loadExternalArchive(uri, archivepath, urihash,
+									domainbundlestorage);
 							if (urihash.sha256 != null && !urihash.sha256.equals(extarchive.hashes.sha256)) {
 								throw new BundleDependencyUnsatisfiedException(
 										"Failed to load external dependency: " + uri + " (SHA-256 mismatch, expected: "
@@ -1382,25 +1378,10 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 		return result;
 	}
 
-	private ExternalArchiveReference loadExternalArchive(URI uri, Path archivepath, Hashes expectedhashes)
-			throws IOException {
+	private ExternalArchiveReference loadExternalArchive(URI uri, Path archivepath, Hashes expectedhashes,
+			AbstractBundleStorageView bundlestorage) throws IOException {
 		return loadExternalArchiveImpl(archivepath, expectedhashes, uri, () -> {
-			URL url;
-			if (TestFlag.ENABLED) {
-				url = TestFlag.metric().toURL(uri);
-			} else {
-				url = uri.toURL();
-			}
-			URLConnection conn = url.openConnection();
-			if (conn instanceof HttpURLConnection) {
-				HttpURLConnection httpconn = (HttpURLConnection) conn;
-				httpconn.setRequestMethod("GET");
-				httpconn.setDoOutput(false);
-				httpconn.setDoInput(true);
-				httpconn.setConnectTimeout(10000);
-				httpconn.setReadTimeout(10000);
-			}
-			return conn.getInputStream();
+			return bundlestorage.openExternalDependencyURI(uri, expectedhashes);
 		});
 	}
 
@@ -1525,7 +1506,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 
 	private Path getExternalArchivePath(URI uri, Hashes hash) {
 		Path path = repository.getRepositoryStorageDirectory().resolve(STORAGE_DIRECTORY_NAME_EXTERNAL_ARCHIVES)
-				.resolve(sha256(uri));
+				.resolve(BundleUtils.sha256(uri));
 		if (hash != null) {
 			if (hash.sha256 != null) {
 				path = path.resolve(hash.sha256);
@@ -1540,17 +1521,6 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			}
 		}
 		return path.resolve("archive.jar");
-	}
-
-	private static String sha256(URI uri) {
-		try {
-			//XXX reuse digest
-			MessageDigest digest = MessageDigest.getInstance("SHA-256");
-			digest.update(uri.toString().getBytes(StandardCharsets.UTF_8));
-			return StringUtils.toHexString(digest.digest());
-		} catch (NoSuchAlgorithmException e) {
-			throw new AssertionError(e);
-		}
 	}
 
 	private static Set<BundleKey> toBundleKeySet(BundleVersionLookupResult lookedupversions) {
