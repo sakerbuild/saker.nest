@@ -33,7 +33,7 @@ import saker.build.thirdparty.saker.util.io.JarFileUtils;
 import saker.build.thirdparty.saker.util.io.SerialUtils;
 
 public class JarExternalArchiveImpl extends AbstractExternalArchive implements JarExternalArchive {
-	private final transient ExternalArchiveKey archiveKey;
+	private final ExternalArchiveKey archiveKey;
 	private final SeekableByteChannel channel;
 	private final JarFile jar;
 	private final LazySupplier<NavigableSet<String>> entryNames;

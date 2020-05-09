@@ -86,10 +86,11 @@ public final class BundleDependencyInformation implements Externalizable {
 	 *            The dependencies.
 	 * @return The new dependency information object.
 	 * @throws NullPointerException
-	 *             If the argument is <code>null</code>.
+	 *             If the argument or any elements of it are <code>null</code>.
 	 * @throws IllegalArgumentException
 	 *             If any of the bundle identifier keys in the argument contains
-	 *             {@linkplain BundleIdentifier#getVersionQualifier() version qualifier}.
+	 *             {@linkplain BundleIdentifier#getVersionQualifier() version qualifier} or duplicate bundle identifiers
+	 *             are encountered.
 	 */
 	public static BundleDependencyInformation create(Map<BundleIdentifier, ? extends BundleDependencyList> dependencies)
 			throws NullPointerException, IllegalArgumentException {

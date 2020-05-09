@@ -26,13 +26,12 @@ public final class NestRepositoryExternalArchiveClassLoader extends MultiDataCla
 		registerAsParallelCapable();
 	}
 
-	private final transient NestRepositoryBundleClassLoader owner;
+	private final NestRepositoryBundleClassLoader owner;
+	private final AbstractExternalArchive archive;
 
 	private final Set<NestRepositoryExternalArchiveClassLoader> externalClassLoaderDomain;
 
 	private final ConcurrentSkipListMap<String, Class<?>> archiveLoadedClasses = new ConcurrentSkipListMap<>();
-
-	private final AbstractExternalArchive archive;
 
 	public NestRepositoryExternalArchiveClassLoader(NestRepositoryBundleClassLoader owner, ClassLoader parent,
 			AbstractExternalArchive archive, Set<NestRepositoryExternalArchiveClassLoader> externalClassLoaderDomain) {

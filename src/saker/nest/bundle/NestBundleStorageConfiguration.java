@@ -449,7 +449,7 @@ public interface NestBundleStorageConfiguration {
 	 *             If the bundle wasn't found or failed to be loaded.
 	 * @throws BundleDependencyUnsatisfiedException
 	 *             If the dependencies of the bundle failed to be satisfied.
-	 * @see {@link #getBundleClassLoader(BundleLookup, BundleIdentifier)}
+	 * @see #getBundleClassLoader(BundleLookup, BundleIdentifier)
 	 */
 	public ClassLoader getBundleClassLoader(BundleKey bundlekey)
 			throws NullPointerException, BundleLoadingFailedException, BundleDependencyUnsatisfiedException;

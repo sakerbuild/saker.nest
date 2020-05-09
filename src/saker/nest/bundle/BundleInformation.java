@@ -151,6 +151,20 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	 */
 	public static final String ENTRY_BUNDLE_DEPENDENCIES = "META-INF/nest/dependencies";
 
+	/**
+	 * Bundle entry name for external dependencies.
+	 * <p>
+	 * The file contains {@link ExternalDependencyInformation} data in the format specified by
+	 * {@link ExternalDependencyInformation#readFrom(InputStream)}.
+	 * <p>
+	 * Dependencies declared with the <code>{@value #DEPENDENCY_KIND_CLASSPATH}</code> kind will be added tot he runtime
+	 * classpath of the bundle.
+	 * <p>
+	 * The classpath dependencies can have various meta-datas that can be used to configure the classpath loading for
+	 * various environments. See the <code>DEPENDENCY_META_*</code> constants declared in this class.
+	 * 
+	 * @since saker.nest 0.8.5
+	 */
 	public static final String ENTRY_BUNDLE_EXTERNAL_DEPENDENCIES = "META-INF/nest/external_dependencies";
 
 	/**
@@ -281,9 +295,9 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	public static final String SPECIAL_CLASSPATH_DEPENDENCY_JDK_TOOLS = "jdktools";
 
 	/**
-	 * Dependency kind for specifying that a bundle is required to be on the classpath.
+	 * Dependency kind for specifying that the dependency is required to be on the classpath.
 	 * <p>
-	 * The denoted bundle is used to lookup classes which are required by classes contained in this bundle.
+	 * The denoted archive is used to lookup classes which are required by classes contained in this bundle.
 	 */
 	public static final String DEPENDENCY_KIND_CLASSPATH = "classpath";
 	/**
@@ -732,6 +746,15 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 		return dependencyInformation;
 	}
 
+	/**
+	 * Gets the external dependencies of this bundle.
+	 * <p>
+	 * If the bundle declares no external dependencies, an empty informaiton object is returned.
+	 * 
+	 * @return The external dependency information. Never <code>null</code>.
+	 * @see #ENTRY_BUNDLE_EXTERNAL_DEPENDENCIES
+	 * @since saker.nest 0.8.5
+	 */
 	public ExternalDependencyInformation getExternalDependencyInformation() {
 		return externalDependencyInformation;
 	}

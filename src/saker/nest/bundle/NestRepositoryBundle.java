@@ -119,11 +119,8 @@ public interface NestRepositoryBundle {
 	 * @param name
 	 *            The name.
 	 * @return <code>true</code> if the entry is present.
-	 * @throws NullPointerException
-	 *             If the argument is <code>null</code>. (Optional exception, implementations may return
-	 *             <code>null</code> instead.)
 	 */
-	public default boolean hasEntry(String name) throws NullPointerException {
+	public default boolean hasEntry(String name) {
 		return name != null && getEntryNames().contains(name);
 	}
 

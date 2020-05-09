@@ -31,9 +31,23 @@ import saker.build.thirdparty.saker.util.ImmutableUtils;
 import saker.build.thirdparty.saker.util.ObjectUtils;
 import saker.build.thirdparty.saker.util.io.SerialUtils;
 
+/**
+ * List of external dependency specifications for a given resource.
+ * <p>
+ * The dependency list is an immutable information object used with {@link ExternalDependencyInformation} that holds the
+ * dependency data for a given external reosurce dependency.
+ * <p>
+ * Use {@link #builder()} to create a new instance.
+ * 
+ * @since saker.nest 0.8.5
+ * @see ExternalDependencyInformation
+ */
 public final class ExternalDependencyList implements Externalizable {
 	private static final long serialVersionUID = 1L;
 
+	/**
+	 * A singleton instance that contains no properties.
+	 */
 	public static final ExternalDependencyList EMPTY = new ExternalDependencyList();
 	static {
 		EMPTY.sourceAttachments = Collections.emptyMap();
@@ -53,30 +67,68 @@ public final class ExternalDependencyList implements Externalizable {
 	public ExternalDependencyList() {
 	}
 
+	/**
+	 * Gets the expected SHA-256 hash.
+	 * 
+	 * @return The SHA-256 hash in lowercase hexa format or <code>null</code> if none.
+	 */
 	public String getSha256Hash() {
 		return sha256Hash;
 	}
 
+	/**
+	 * Gets the expected SHA-1 hash.
+	 * 
+	 * @return The SHA-1 hash in lowercase hexa format or <code>null</code> if none.
+	 */
 	public String getSha1Hash() {
 		return sha1Hash;
 	}
 
+	/**
+	 * Gets the expected MD5 hash.
+	 * 
+	 * @return The MD5 hash in lowercase hexa format or <code>null</code> if none.
+	 */
 	public String getMd5Hash() {
 		return md5Hash;
 	}
 
+	/**
+	 * Gets the source attachments.
+	 * 
+	 * @return An unmodifiable map of source attachment informations.
+	 */
 	public Map<URI, ExternalAttachmentInformation> getSourceAttachments() {
 		return sourceAttachments;
 	}
 
+	/**
+	 * Gets the documentation attachments.
+	 * 
+	 * @return An unmodifiable map of documentation attachment informations.
+	 */
 	public Map<URI, ExternalAttachmentInformation> getDocumentationAttachments() {
 		return documentationAttachments;
 	}
 
+	/**
+	 * Gets the dependencies contained in this object.
+	 * 
+	 * @return An unmodifiable set of dependencies.
+	 */
 	public Set<? extends ExternalDependency> getDependencies() {
 		return dependencies;
 	}
 
+	/**
+	 * Checks if this dependency object is empty.
+	 * <p>
+	 * Note that even if this method returns <code>true</code>, the object may still contain other values such as hashes
+	 * and attachments. It just checks if {@link #getDependencies()} contains any elements.
+	 * 
+	 * @return <code>true</code> if there are no declared dependencies in this information object.
+	 */
 	public boolean isEmpty() {
 		return ObjectUtils.isNullOrEmpty(dependencies);
 	}
@@ -169,10 +221,18 @@ public final class ExternalDependencyList implements Externalizable {
 				+ "]";
 	}
 
+	/**
+	 * Creates a new {@link ExternalDependencyList} builder.
+	 * 
+	 * @return The builder.
+	 */
 	public static ExternalDependencyList.Builder builder() {
 		return new Builder();
 	}
 
+	/**
+	 * Builder class for {@link ExternalDependencyList}.
+	 */
 	public static final class Builder {
 		private String sha256Hash;
 		private String sha1Hash;
@@ -185,60 +245,180 @@ public final class ExternalDependencyList implements Externalizable {
 		Builder() {
 		}
 
+		/**
+		 * Gets the SHA-256 hash previously set using {@link #setSha256Hash(String)}.
+		 * 
+		 * @return The hash or <code>null</code> if none.
+		 */
 		public String getSha256Hash() {
 			return sha256Hash;
 		}
 
+		/**
+		 * Gets the SHA-1 hash previously set using {@link #setSha1Hash(String)}.
+		 * 
+		 * @return The hash or <code>null</code> if none.
+		 */
 		public String getSha1Hash() {
 			return sha1Hash;
 		}
 
+		/**
+		 * Gets the MD5 hash previously set using {@link #setMd5Hash(String)}.
+		 * 
+		 * @return The hash or <code>null</code> if none.
+		 */
 		public String getMd5Hash() {
 			return md5Hash;
 		}
 
-		public Builder setSha256Hash(String sha256Hash) {
-			this.sha256Hash = sha256Hash;
+		/**
+		 * Sets the SHA-256 hash.
+		 * <p>
+		 * The argument will be converted to lowercase hexa representation.
+		 * 
+		 * @param sha256Hash
+		 *            The hash or <code>null</code> to unset.
+		 * @return <code>this</code>
+		 * @throws IllegalArgumentException
+		 *             If the argument is not a valid SHA-256 hash in hexa format.
+		 * @see ExternalDependencyList#getSha256Hash()
+		 */
+		public Builder setSha256Hash(String sha256Hash) throws IllegalArgumentException {
+			if (sha256Hash == null) {
+				this.sha256Hash = null;
+				return this;
+			}
+			this.sha256Hash = ExternalDependencyInformation.validateSha256(sha256Hash);
 			return this;
 		}
 
-		public Builder setSha1Hash(String sha1Hash) {
-			this.sha1Hash = sha1Hash;
+		/**
+		 * Sets the SHA-1 hash.
+		 * <p>
+		 * The argument will be converted to lowercase hexa representation.
+		 * 
+		 * @param sha1Hash
+		 *            The hash or <code>null</code> to unset.
+		 * @return <code>this</code>
+		 * @throws IllegalArgumentException
+		 *             If the argument is not a valid SHA-1 hash in hexa format.
+		 * @see ExternalDependencyList#getSha1Hash()
+		 */
+		public Builder setSha1Hash(String sha1Hash) throws IllegalArgumentException {
+			if (sha1Hash == null) {
+				this.sha1Hash = null;
+				return this;
+			}
+			this.sha1Hash = ExternalDependencyInformation.validateSha1(sha1Hash);
 			return this;
 		}
 
-		public Builder setMd5Hash(String md5Hash) {
-			this.md5Hash = md5Hash;
+		/**
+		 * Sets the MD5 hash.
+		 * <p>
+		 * The argument will be converted to lowercase hexa representation.
+		 * 
+		 * @param md5Hash
+		 *            The hash or <code>null</code> to unset.
+		 * @return <code>this</code>
+		 * @throws IllegalArgumentException
+		 *             If the argument is not a valid MD5 hash in hexa format.
+		 * @see ExternalDependencyList#getMd5Hash()
+		 */
+		public Builder setMd5Hash(String md5Hash) throws IllegalArgumentException {
+			if (md5Hash == null) {
+				this.md5Hash = null;
+				return this;
+			}
+			this.md5Hash = ExternalDependencyInformation.validateMd5(md5Hash);
 			return this;
 		}
 
-		public Builder addDepdendency(ExternalDependency dep) {
+		/**
+		 * Adds the argument dependency to the list of dependencies.
+		 * 
+		 * @param dep
+		 *            The dependency.
+		 * @return <code>this</code>
+		 * @throws NullPointerException
+		 *             If the argument is <code>null</code>
+		 * @see ExternalDependencyList#getDependencies()
+		 */
+		public Builder addDepdendency(ExternalDependency dep) throws NullPointerException {
+			Objects.requireNonNull(dep, "dependency");
 			this.dependencies.add(dep);
 			return this;
 		}
 
+		/**
+		 * Checks if a source attachment is already added for the given {@link URI}.
+		 * 
+		 * @param uri
+		 *            The {@link URI} to check for.
+		 * @return <code>true</code> if a source attachment is already present for the given resource identifier.
+		 */
 		public boolean hasSourceAttachment(URI uri) {
-			return sourceAttachments.containsKey(uri);
+			return uri != null && sourceAttachments.containsKey(uri);
 		}
 
-		public Builder addSourceAttachment(URI uri, ExternalAttachmentInformation info) {
+		/**
+		 * Adds a source attachment.
+		 * 
+		 * @param uri
+		 *            The {@link URI} of the attachment.
+		 * @param info
+		 *            The attachment information.
+		 * @return <code>this</code>
+		 * @throws NullPointerException
+		 *             If any of the arguments are <code>null</code>.
+		 * @see ExternalDependencyList#getSourceAttachments()
+		 */
+		public Builder addSourceAttachment(URI uri, ExternalAttachmentInformation info) throws NullPointerException {
 			Objects.requireNonNull(uri, "uri");
 			Objects.requireNonNull(info, "external attachment info");
 			this.sourceAttachments.put(uri, info);
 			return this;
 		}
 
+		/**
+		 * Checks if a documentation attachment is already added for the given {@link URI}.
+		 * 
+		 * @param uri
+		 *            The {@link URI} to check for.
+		 * @return <code>true</code> if a documentation attachment is already present for the given resource identifier.
+		 */
 		public boolean hasDocumentationAttachment(URI uri) {
-			return documentationAttachments.containsKey(uri);
+			return uri != null && documentationAttachments.containsKey(uri);
 		}
 
-		public Builder addDocumentationAttachment(URI uri, ExternalAttachmentInformation info) {
+		/**
+		 * Adds a documentation attachment.
+		 * 
+		 * @param uri
+		 *            The {@link URI} of the attachment.
+		 * @param info
+		 *            The attachment information.
+		 * @return <code>this</code>
+		 * @throws NullPointerException
+		 *             If any of the arguments are <code>null</code>.
+		 * @see ExternalDependencyList#getDocumentationAttachments()
+		 */
+		public Builder addDocumentationAttachment(URI uri, ExternalAttachmentInformation info)
+				throws NullPointerException {
 			Objects.requireNonNull(uri, "uri");
 			Objects.requireNonNull(info, "external attachment info");
 			this.documentationAttachments.put(uri, info);
 			return this;
 		}
 
+		/**
+		 * Creates an {@link ExternalDependencyList} object from the contents of this builder.
+		 * <p>
+		 * The builder can be reused after this call.
+		 * 
+		 * @return The constructed dependency list.
+		 */
 		public ExternalDependencyList build() {
 			ExternalDependencyList res = new ExternalDependencyList();
 			res.sha256Hash = this.sha256Hash;
