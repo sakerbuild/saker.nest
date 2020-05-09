@@ -102,7 +102,7 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 	 * Unmodifiable map of dependency class loaders.
 	 */
 	private final Map<BundleKey, DependentClassLoader<? extends NestRepositoryBundleClassLoader>> dependencyClassLoaders;
-	private final Set<DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> externalDependencyClassLoaders;
+	private final Map<ExternalArchiveKey, DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> externalDependencyClassLoaders;
 	private final BundleLookup relativeBundleLookup;
 
 	private final ConcurrentSkipListMap<String, Class<?>> bundleLoadedClasses = new ConcurrentSkipListMap<>();
@@ -114,14 +114,18 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 			BundleKey bundlekey, AbstractNestRepositoryBundle bundle,
 			Map<BundleKey, ? extends DependentClassLoader<? extends NestRepositoryBundleClassLoader>> dependencyClassLoaders,
 			BundleLookup relativeBundleLookup,
-			Set<DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> externalDependencyClassLoaders) {
+			Map<ExternalArchiveKey, DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> externalDependencyClassLoaders) {
 		super(parent, new NestBundleClassLoaderDataFinder(bundle));
 		this.configuredStorage = configuredStorage;
 		this.bundleKey = bundlekey;
 		this.bundle = bundle;
 		this.relativeBundleLookup = relativeBundleLookup;
 		this.dependencyClassLoaders = ImmutableUtils.unmodifiableMap(dependencyClassLoaders);
-		this.externalDependencyClassLoaders = ImmutableUtils.unmodifiableSet(externalDependencyClassLoaders);
+		this.externalDependencyClassLoaders = ImmutableUtils.unmodifiableMap(externalDependencyClassLoaders);
+	}
+
+	public Map<ExternalArchiveKey, DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> getExternalDependencyClassLoaders() {
+		return externalDependencyClassLoaders;
 	}
 
 	@Override
@@ -323,7 +327,8 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 	private Class<?> findExternalClassRecursively(Set<NestBundleClassLoader> triedcls, String name,
 			ClassNotFoundException e, boolean allowprivate) {
 		if (!externalDependencyClassLoaders.isEmpty()) {
-			for (DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader> depcl : externalDependencyClassLoaders) {
+			for (DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader> depcl : externalDependencyClassLoaders
+					.values()) {
 				if (depcl.privateScope && !allowprivate) {
 					continue;
 				}
@@ -430,6 +435,10 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 		MessageDigest hasher = FileUtils.getDefaultFileHasher();
 		for (byte[] hash : hashes.values()) {
 			hasher.update(hash);
+		}
+		for (DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader> extdcl : externalDependencyClassLoaders
+				.values()) {
+			hasher.update(extdcl.classLoader.getArchive().getSharedHash());
 		}
 		return hasher.digest();
 	}

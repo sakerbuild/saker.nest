@@ -22,19 +22,32 @@ import saker.build.thirdparty.saker.util.classloader.MultiDataClassLoader;
 import saker.build.thirdparty.saker.util.io.IOUtils;
 
 public final class NestRepositoryExternalArchiveClassLoader extends MultiDataClassLoader {
-
 	static {
 		registerAsParallelCapable();
 	}
+
+	private final transient NestRepositoryBundleClassLoader owner;
 
 	private final Set<NestRepositoryExternalArchiveClassLoader> externalClassLoaderDomain;
 
 	private final ConcurrentSkipListMap<String, Class<?>> archiveLoadedClasses = new ConcurrentSkipListMap<>();
 
-	public NestRepositoryExternalArchiveClassLoader(ClassLoader parent, AbstractExternalArchive archive,
-			Set<NestRepositoryExternalArchiveClassLoader> externalClassLoaderDomain) {
+	private final AbstractExternalArchive archive;
+
+	public NestRepositoryExternalArchiveClassLoader(NestRepositoryBundleClassLoader owner, ClassLoader parent,
+			AbstractExternalArchive archive, Set<NestRepositoryExternalArchiveClassLoader> externalClassLoaderDomain) {
 		super(parent, new ExternalArchiveClassLoaderDataFinder(archive));
+		this.owner = owner;
+		this.archive = archive;
 		this.externalClassLoaderDomain = externalClassLoaderDomain;
+	}
+
+	public NestRepositoryBundleClassLoader getOwner() {
+		return owner;
+	}
+
+	public AbstractExternalArchive getArchive() {
+		return archive;
 	}
 
 	/**

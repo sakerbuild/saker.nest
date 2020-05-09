@@ -19,4 +19,6 @@ import java.io.Closeable;
 
 public abstract class AbstractExternalArchive implements ExternalArchive, Closeable {
 	public abstract byte[] getSharedHash();
+
+	public abstract ExternalArchiveKey getArchiveKey();
 }

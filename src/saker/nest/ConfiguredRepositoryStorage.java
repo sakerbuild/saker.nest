@@ -84,6 +84,7 @@ import saker.nest.bundle.BundleInformation;
 import saker.nest.bundle.BundleKey;
 import saker.nest.bundle.BundleUtils;
 import saker.nest.bundle.DependencyConstraintConfiguration;
+import saker.nest.bundle.ExternalArchiveKey;
 import saker.nest.bundle.ExternalDependency;
 import saker.nest.bundle.ExternalDependencyInformation;
 import saker.nest.bundle.ExternalDependencyList;
@@ -1211,18 +1212,18 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			BundleInformation bundleinfo = domainbundle.getInformation();
 			ClassLoader parentcl = BundleUtils.createAppropriateParentClassLoader(bundleinfo);
 
-			Set<DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> externaldependencyclassloaders;
+			Map<ExternalArchiveKey, DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> externaldependencyclassloaders = new LinkedHashMap<>();
 			ExternalDependencyInformation extdependencies = bundleinfo.getExternalDependencyInformation();
-			if (extdependencies.isEmpty()) {
-				externaldependencyclassloaders = Collections.emptySet();
-			} else {
-				externaldependencyclassloaders = new LinkedHashSet<>();
+			NestRepositoryBundleClassLoader constructedcl = new NestRepositoryBundleClassLoader(parentcl, this,
+					domain.bundle, domainbundle, dependencyclassloaders, relativebundlelookup,
+					externaldependencyclassloaders);
+			if (!extdependencies.isEmpty()) {
 				NavigableMap<URI, Hashes> urihashes = BundleUtils
 						.getExternalDependencyInformationHashes(extdependencies);
 
 				List<Entry<URI, Set<ExternalDependency>>> loaddependencies = new ArrayList<>();
 
-				List<List<DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>>> loadedextclassloaders = new ArrayList<>();
+				List<List<Entry<ExternalArchiveKey, DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>>>> loadedextclassloaders = new ArrayList<>();
 
 				for (Entry<URI, ? extends ExternalDependencyList> entry : extdependencies.getDependencies()
 						.entrySet()) {
@@ -1263,9 +1264,9 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 							Set<ExternalDependency> deps = entry.getValue();
 							Hashes urihash = urihashes.get(uri);
 
-							List<DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> entryloadlist = loadedextclassloaders
+							List<Entry<ExternalArchiveKey, DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>>> entryloadlist = loadedextclassloaders
 									.get(depidx++);
-							List<DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> mainloadlist = loadedextclassloaders
+							List<Entry<ExternalArchiveKey, DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>>> mainloadlist = loadedextclassloaders
 									.get(depidx++);
 
 							Path archivepath = getExternalArchivePath(uri, urihash);
@@ -1322,23 +1323,26 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 																		ee);
 															}
 															NestRepositoryExternalArchiveClassLoader extcl = new NestRepositoryExternalArchiveClassLoader(
-																	parentcl, embeddedarchive.archive,
+																	constructedcl, parentcl, embeddedarchive.archive,
 																	extclassloaderdomain);
 
 															boolean privatedep = isEntryAllPrivateDependencies(ename,
 																	deps);
-															entryloadlist.set(idx,
-																	new DependentClassLoader<>(extcl, privatedep));
+															entryloadlist.set(idx, ImmutableUtils.makeImmutableMapEntry(
+																	new ExternalArchiveKey(uri, ename),
+																	new DependentClassLoader<>(extcl, privatedep)));
 														});
 
 											}
 										}
 										if (isMainArchiveIncluded(deps)) {
 											NestRepositoryExternalArchiveClassLoader extcl = new NestRepositoryExternalArchiveClassLoader(
-													parentcl, extarchive.archive, extclassloaderdomain);
+													constructedcl, parentcl, extarchive.archive, extclassloaderdomain);
 
 											boolean privatedep = isMainAllPrivateDependencies(deps);
-											mainloadlist.add(new DependentClassLoader<>(extcl, privatedep));
+											mainloadlist.add(
+													ImmutableUtils.makeImmutableMapEntry(new ExternalArchiveKey(uri),
+															new DependentClassLoader<>(extcl, privatedep)));
 										}
 									});
 
@@ -1347,23 +1351,20 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 						throw new BundleDependencyUnsatisfiedException(
 								"Failed to load external dependencies for: " + bundleinfo.getBundleIdentifier(), e);
 					}
-					for (List<DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> depcllist : loadedextclassloaders) {
-						externaldependencyclassloaders.addAll(depcllist);
-						for (DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader> dcl : depcllist) {
+					for (List<Entry<ExternalArchiveKey, DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>>> depcllist : loadedextclassloaders) {
+						for (Entry<ExternalArchiveKey, DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> dcl : depcllist) {
 							if (dcl == null) {
 								//shouldn't happen, ever.
 								throw new BundleDependencyUnsatisfiedException(
 										"Failed to load external dependencies for: "
 												+ bundleinfo.getBundleIdentifier());
 							}
-							extclassloaderdomain.add(dcl.classLoader);
+							externaldependencyclassloaders.put(dcl.getKey(), dcl.getValue());
+							extclassloaderdomain.add(dcl.getValue().classLoader);
 						}
 					}
 				}
 			}
-			NestRepositoryBundleClassLoader constructedcl = new NestRepositoryBundleClassLoader(parentcl, this,
-					domain.bundle, domainbundle, dependencyclassloaders, relativebundlelookup,
-					externaldependencyclassloaders);
 
 			constructedcldependencies.put(domain, dependencyclassloaders);
 			constructeddomaincls.put(domain, constructedcl);
@@ -1487,7 +1488,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 
 	private ExternalArchiveReference loadExternalArchive(URI uri, Path archivepath, Hashes expectedhashes,
 			AbstractBundleStorageView bundlestorage) throws IOException {
-		return loadExternalArchiveImpl(archivepath, expectedhashes, uri, () -> {
+		return loadExternalArchiveImpl(new ExternalArchiveKey(uri), archivepath, expectedhashes, uri, () -> {
 			return bundlestorage.openExternalDependencyURI(uri, expectedhashes);
 		});
 	}
@@ -1496,11 +1497,13 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			Path entrypath, URI archiveuri) throws IOException {
 
 		HashingInputStream[] hashingin = { null };
-		ExternalArchiveReference result = loadExternalArchiveImpl(entrypath, null, null, () -> {
-			InputStream entryis = containingarchive.archive.openEntry(ename);
-			hashingin[0] = new HashingInputStream(entryis);
-			return hashingin[0];
-		});
+		ExternalArchiveReference result = loadExternalArchiveImpl(
+				new ExternalArchiveKey(containingarchive.archive.getArchiveKey().getUri(), ename), entrypath, null,
+				null, () -> {
+					InputStream entryis = containingarchive.archive.openEntry(ename);
+					hashingin[0] = new HashingInputStream(entryis);
+					return hashingin[0];
+				});
 		Hashes entryhash;
 		if (hashingin[0] != null) {
 			Hashes hashes = hashingin[0].getHashes();
@@ -1519,8 +1522,9 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 		return result;
 	}
 
-	private ExternalArchiveReference loadExternalArchiveImpl(Path archivepath, Hashes expectedhashes,
-			Object loadexceptioninfo, IOSupplier<InputStream> archiveinputsupplier) throws IOException {
+	private ExternalArchiveReference loadExternalArchiveImpl(ExternalArchiveKey archivekey, Path archivepath,
+			Hashes expectedhashes, Object loadexceptioninfo, IOSupplier<InputStream> archiveinputsupplier)
+			throws IOException {
 		ExternalArchiveReference extarchive;
 		synchronized (repository.externalArchiveLoadLocks.computeIfAbsent(archivepath, Functionals.objectComputer())) {
 			extarchive = repository.externalArchives.get(archivepath);
@@ -1529,7 +1533,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			}
 			Hashes loadhashes = loadExternalArchiveFromInputImpl(archivepath, expectedhashes, loadexceptioninfo,
 					archiveinputsupplier);
-			JarExternalArchiveImpl jararchive = JarExternalArchiveImpl.create(archivepath);
+			JarExternalArchiveImpl jararchive = JarExternalArchiveImpl.create(archivekey, archivepath);
 			extarchive = createArchiveReference(jararchive);
 			if (loadhashes != null && !loadhashes.equals(extarchive.hashes)) {
 				IOException e = new IOException(

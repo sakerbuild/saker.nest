@@ -33,24 +33,26 @@ import saker.build.thirdparty.saker.util.io.JarFileUtils;
 import saker.build.thirdparty.saker.util.io.SerialUtils;
 
 public class JarExternalArchiveImpl extends AbstractExternalArchive implements JarExternalArchive {
+	private final transient ExternalArchiveKey archiveKey;
 	private final SeekableByteChannel channel;
 	private final JarFile jar;
 	private final LazySupplier<NavigableSet<String>> entryNames;
 
 	private final LazySupplier<byte[]> jarHash = LazySupplier.of(this::computeJarHash);
 
-	private JarExternalArchiveImpl(SeekableByteChannel channel, JarFile jar) {
+	private JarExternalArchiveImpl(ExternalArchiveKey archiveKey, SeekableByteChannel channel, JarFile jar) {
+		this.archiveKey = archiveKey;
 		this.channel = channel;
 		this.jar = jar;
 		this.entryNames = LazySupplier.of(() -> BundleUtils.getJarEntryNames(jar));
 	}
 
-	public static JarExternalArchiveImpl create(Path jarpath) throws IOException {
+	public static JarExternalArchiveImpl create(ExternalArchiveKey archiveKey, Path jarpath) throws IOException {
 		SeekableByteChannel channel = BundleUtils.openExclusiveChannelForJar(jarpath);
 		try {
 			JarFile jarfile = JarFileUtils.createMultiReleaseJarFile(jarpath);
 			try {
-				return new JarExternalArchiveImpl(channel, jarfile);
+				return new JarExternalArchiveImpl(archiveKey, channel, jarfile);
 			} catch (Throwable e) {
 				IOUtils.addExc(e, IOUtils.closeExc(jarfile));
 				throw e;
@@ -59,6 +61,11 @@ public class JarExternalArchiveImpl extends AbstractExternalArchive implements J
 			IOUtils.addExc(e, IOUtils.closeExc(channel));
 			throw e;
 		}
+	}
+
+	@Override
+	public ExternalArchiveKey getArchiveKey() {
+		return archiveKey;
 	}
 
 	public SeekableByteChannel getChannel() {
