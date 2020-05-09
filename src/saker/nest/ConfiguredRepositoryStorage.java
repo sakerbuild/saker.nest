@@ -51,6 +51,7 @@ import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -69,6 +70,9 @@ import saker.build.thirdparty.saker.util.io.FileUtils;
 import saker.build.thirdparty.saker.util.io.IOUtils;
 import saker.build.thirdparty.saker.util.io.StreamUtils;
 import saker.build.thirdparty.saker.util.io.function.IOSupplier;
+import saker.build.thirdparty.saker.util.thread.ParallelExecutionException;
+import saker.build.thirdparty.saker.util.thread.ThreadUtils;
+import saker.build.thirdparty.saker.util.thread.ThreadUtils.ThreadWorkPool;
 import saker.build.util.java.JavaTools;
 import saker.nest.NestRepositoryImpl.ExternalArchiveReference;
 import saker.nest.bundle.AbstractNestRepositoryBundle;
@@ -116,7 +120,6 @@ import saker.nest.dependency.DependencyResolutionLogger;
 import saker.nest.dependency.DependencyUtils;
 import saker.nest.exc.BundleDependencyUnsatisfiedException;
 import saker.nest.exc.BundleLoadingFailedException;
-import saker.nest.exc.IllegalArchiveEntryNameException;
 import saker.nest.meta.Versions;
 import saker.nest.thirdparty.org.json.JSONArray;
 import saker.nest.thirdparty.org.json.JSONObject;
@@ -1213,21 +1216,19 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			if (extdependencies.isEmpty()) {
 				externaldependencyclassloaders = Collections.emptySet();
 			} else {
-				Set<ExternalDependency> depbuffer = new LinkedHashSet<>();
-				//TODO parallelize this
-				Set<NestRepositoryExternalArchiveClassLoader> extclassloaderdomain = new LinkedHashSet<>();
 				externaldependencyclassloaders = new LinkedHashSet<>();
 				NavigableMap<URI, Hashes> urihashes = BundleUtils
 						.getExternalDependencyInformationHashes(extdependencies);
+
+				List<Entry<URI, Set<ExternalDependency>>> loaddependencies = new ArrayList<>();
+
+				List<List<DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>>> loadedextclassloaders = new ArrayList<>();
+
 				for (Entry<URI, ? extends ExternalDependencyList> entry : extdependencies.getDependencies()
 						.entrySet()) {
-					depbuffer.clear();
-					ExternalDependencyList deplist = entry.getValue();
-					URI uri = entry.getKey();
-					Hashes urihash = urihashes.get(uri);
-					Path archivepath = getExternalArchivePath(uri, urihash);
+					Set<ExternalDependency> depbuffer = new LinkedHashSet<>();
 
-					for (ExternalDependency extdep : deplist.getDependencies()) {
+					for (ExternalDependency extdep : entry.getValue().getDependencies()) {
 						if (DependencyUtils.isDependencyConstraintExcludes(constraintConfiguration, extdep)) {
 							continue;
 						}
@@ -1238,55 +1239,124 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 
 						depbuffer.add(extdep);
 					}
-					if (!depbuffer.isEmpty()) {
-						try {
-							ExternalArchiveReference extarchive = loadExternalArchive(uri, archivepath, urihash,
-									domainbundlestorage);
-							if (urihash.sha256 != null && !urihash.sha256.equals(extarchive.hashes.sha256)) {
-								throw new BundleDependencyUnsatisfiedException(
-										"Failed to load external dependency: " + uri + " (SHA-256 mismatch, expected: "
-												+ urihash.sha256 + " actual: " + extarchive.hashes.sha256 + ")");
-							}
-							if (urihash.sha1 != null && !urihash.sha1.equals(extarchive.hashes.sha1)) {
-								throw new BundleDependencyUnsatisfiedException(
-										"Failed to load external dependency: " + uri + " (SHA-1 mismatch, expected: "
-												+ urihash.sha1 + " actual: " + extarchive.hashes.sha1 + ")");
-							}
-							if (urihash.md5 != null && !urihash.md5.equals(extarchive.hashes.md5)) {
-								throw new BundleDependencyUnsatisfiedException(
-										"Failed to load external dependency: " + uri + " (MD5 mismatch, expected: "
-												+ urihash.md5 + " actual: " + extarchive.hashes.md5 + ")");
-							}
-							boolean privatedep = isAllPrivateDependencies(depbuffer);
+					if (depbuffer.isEmpty()) {
+						continue;
+					}
 
-							if (hasNonEmptyEntriesDependency(depbuffer)) {
-								for (String ename : extarchive.archive.getEntryNames()) {
-									if (includesEntryName(ename, depbuffer)) {
-										try {
-											ExternalArchiveReference embeddedarchive = loadEmbeddedArchive(extarchive,
-													ename, archivepath, uri);
-											NestRepositoryExternalArchiveClassLoader extcl = new NestRepositoryExternalArchiveClassLoader(
-													parentcl, embeddedarchive.archive, extclassloaderdomain);
-											extclassloaderdomain.add(extcl);
-											externaldependencyclassloaders
-													.add(new DependentClassLoader<>(extcl, privatedep));
-										} catch (IOException | IllegalArchiveEntryNameException e) {
+					URI uri = entry.getKey();
+					loaddependencies.add(ImmutableUtils.makeImmutableMapEntry(uri, depbuffer));
+
+					//entry load list
+					loadedextclassloaders.add(new ArrayList<>());
+					//main load list
+					loadedextclassloaders.add(new ArrayList<>());
+				}
+
+				if (!loaddependencies.isEmpty()) {
+					Set<NestRepositoryExternalArchiveClassLoader> extclassloaderdomain = new LinkedHashSet<>();
+
+					try (ThreadWorkPool loaderpool = ThreadUtils.newDynamicWorkPool(null, "ext-dep-loader-", null,
+							true)) {
+						int depidx = 0;
+						for (Entry<URI, Set<ExternalDependency>> entry : loaddependencies) {
+							URI uri = entry.getKey();
+							Set<ExternalDependency> deps = entry.getValue();
+							Hashes urihash = urihashes.get(uri);
+
+							List<DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> entryloadlist = loadedextclassloaders
+									.get(depidx++);
+							List<DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> mainloadlist = loadedextclassloaders
+									.get(depidx++);
+
+							Path archivepath = getExternalArchivePath(uri, urihash);
+							loadExternalArchive(loaderpool, uri, archivepath, urihash, domainbundlestorage,
+									(extarchive, e) -> {
+										if (e != null) {
 											throw new BundleDependencyUnsatisfiedException(
-													"Failed to load external dependency entry: " + ename + " in " + uri,
+													"Failed to load external dependency: " + uri + " for "
+															+ bundleinfo.getBundleIdentifier(),
 													e);
 										}
-									}
-								}
+										if (urihash.sha256 != null
+												&& !urihash.sha256.equals(extarchive.hashes.sha256)) {
+											throw new BundleDependencyUnsatisfiedException(
+													"Failed to load external dependency: " + uri + " for "
+															+ bundleinfo.getBundleIdentifier()
+															+ " (SHA-256 mismatch, expected: " + urihash.sha256
+															+ " actual: " + extarchive.hashes.sha256 + ")");
+										}
+										if (urihash.sha1 != null && !urihash.sha1.equals(extarchive.hashes.sha1)) {
+											throw new BundleDependencyUnsatisfiedException(
+													"Failed to load external dependency: " + uri + " for "
+															+ bundleinfo.getBundleIdentifier()
+															+ " (SHA-1 mismatch, expected: " + urihash.sha1
+															+ " actual: " + extarchive.hashes.sha1 + ")");
+										}
+										if (urihash.md5 != null && !urihash.md5.equals(extarchive.hashes.md5)) {
+											throw new BundleDependencyUnsatisfiedException(
+													"Failed to load external dependency: " + uri + " for "
+															+ bundleinfo.getBundleIdentifier()
+															+ " (MD5 mismatch, expected: " + urihash.md5 + " actual: "
+															+ extarchive.hashes.md5 + ")");
+										}
+
+										if (hasNonEmptyEntriesDependency(deps)) {
+											List<String> includedentrynames = new ArrayList<>();
+											for (String ename : extarchive.archive.getEntryNames()) {
+												if (!includesEntryName(ename, deps)) {
+													continue;
+												}
+												includedentrynames.add(ename);
+												entryloadlist.add(null);
+											}
+											int i = 0;
+											for (String ename : includedentrynames) {
+												int idx = i++;
+												loadEmbeddedArchive(loaderpool, extarchive, ename, archivepath, uri,
+														(embeddedarchive, ee) -> {
+															if (ee != null) {
+																throw new BundleDependencyUnsatisfiedException(
+																		"Failed to load external dependency entry: "
+																				+ ename + " in " + uri + " for "
+																				+ bundleinfo.getBundleIdentifier(),
+																		ee);
+															}
+															NestRepositoryExternalArchiveClassLoader extcl = new NestRepositoryExternalArchiveClassLoader(
+																	parentcl, embeddedarchive.archive,
+																	extclassloaderdomain);
+
+															boolean privatedep = isEntryAllPrivateDependencies(ename,
+																	deps);
+															entryloadlist.set(idx,
+																	new DependentClassLoader<>(extcl, privatedep));
+														});
+
+											}
+										}
+										if (isMainArchiveIncluded(deps)) {
+											NestRepositoryExternalArchiveClassLoader extcl = new NestRepositoryExternalArchiveClassLoader(
+													parentcl, extarchive.archive, extclassloaderdomain);
+
+											boolean privatedep = isMainAllPrivateDependencies(deps);
+											mainloadlist.add(new DependentClassLoader<>(extcl, privatedep));
+										}
+									});
+
+						}
+					} catch (ParallelExecutionException e) {
+						throw new BundleDependencyUnsatisfiedException(
+								"Failed to load external dependencies for: " + bundleinfo.getBundleIdentifier(), e);
+					}
+					for (List<DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> depcllist : loadedextclassloaders) {
+						externaldependencyclassloaders.addAll(depcllist);
+						for (DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader> dcl : depcllist) {
+							if (dcl == null) {
+								//shouldn't happen, ever.
+								throw new BundleDependencyUnsatisfiedException(
+										"Failed to load external dependencies for: "
+												+ bundleinfo.getBundleIdentifier());
 							}
-							if (isMainArchiveIncluded(depbuffer)) {
-								NestRepositoryExternalArchiveClassLoader extcl = new NestRepositoryExternalArchiveClassLoader(
-										parentcl, extarchive.archive, extclassloaderdomain);
-								extclassloaderdomain.add(extcl);
-								externaldependencyclassloaders.add(new DependentClassLoader<>(extcl, privatedep));
-							}
-						} catch (IOException | IllegalArchiveEntryNameException e) {
-							throw new BundleDependencyUnsatisfiedException("Failed to load external dependency: " + uri,
-									e);
+							extclassloaderdomain.add(dcl.classLoader);
 						}
 					}
 				}
@@ -1342,8 +1412,11 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 		return false;
 	}
 
-	private static boolean isAllPrivateDependencies(Iterable<? extends ExternalDependency> deps) {
+	private static boolean isMainAllPrivateDependencies(Iterable<? extends ExternalDependency> deps) {
 		for (ExternalDependency dep : deps) {
+			if (!dep.isIncludesMainArchive()) {
+				continue;
+			}
 			if (!dep.isPrivate()) {
 				return false;
 			}
@@ -1351,31 +1424,65 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 		return true;
 	}
 
-	private ExternalArchiveReference loadEmbeddedArchive(ExternalArchiveReference extarchive, String ename,
-			Path archivepath, URI archiveuri) throws IOException {
-		Path entrypath = archivepath.resolveSibling("entries").resolve(ename);
-		HashingInputStream[] hashingin = { null };
-		ExternalArchiveReference result = loadExternalArchiveImpl(entrypath, null, null, () -> {
-			InputStream entryis = extarchive.archive.openEntry(ename);
-			hashingin[0] = new HashingInputStream(entryis);
-			return hashingin[0];
-		});
-		Hashes entryhash;
-		if (hashingin[0] != null) {
-			Hashes hashes = hashingin[0].getHashes();
-			if (hashes != null) {
-				extarchive.putEntryHash(ename, hashes);
-				entryhash = hashes;
-			} else {
-				entryhash = extarchive.getEntryHash(ename);
+	private static boolean isWildcardsInclude(String name, Iterable<? extends WildcardPath> wildcards) {
+		for (WildcardPath wc : wildcards) {
+			if (wc.includes(name)) {
+				return true;
 			}
-		} else {
-			entryhash = extarchive.getEntryHash(ename);
 		}
-		if (!entryhash.equals(result.hashes)) {
-			throw new IOException("External archive entry hash mismatch: " + ename + " in " + archiveuri);
+		return false;
+	}
+
+	private static boolean isEntryAllPrivateDependencies(String ename, Iterable<? extends ExternalDependency> deps) {
+		for (ExternalDependency dep : deps) {
+			Set<WildcardPath> entries = dep.getEntries();
+			if (ObjectUtils.isNullOrEmpty(entries)) {
+				continue;
+			}
+			if (!isWildcardsInclude(ename, entries)) {
+				continue;
+			}
+			if (!dep.isPrivate()) {
+				return false;
+			}
 		}
-		return result;
+		return true;
+	}
+
+	private void loadEmbeddedArchive(ThreadWorkPool loaderpool, ExternalArchiveReference containingarchive,
+			String ename, Path archivepath, URI archiveuri,
+			BiConsumer<ExternalArchiveReference, Exception> resultconsumer) {
+		Path entrypath = archivepath.resolveSibling("entries").resolve(ename);
+		ExternalArchiveReference extarchive = repository.externalArchives.get(entrypath);
+		if (extarchive != null) {
+			resultconsumer.accept(extarchive, null);
+			return;
+		}
+		loaderpool.offer(() -> {
+			try {
+				ExternalArchiveReference archive = loadEmbeddedArchive(containingarchive, ename, entrypath, archiveuri);
+				resultconsumer.accept(archive, null);
+			} catch (Exception e) {
+				resultconsumer.accept(null, e);
+			}
+		});
+	}
+
+	private void loadExternalArchive(ThreadWorkPool loaderpool, URI uri, Path archivepath, Hashes expectedhashes,
+			AbstractBundleStorageView bundlestorage, BiConsumer<ExternalArchiveReference, Exception> resultconsumer) {
+		ExternalArchiveReference extarchive = repository.externalArchives.get(archivepath);
+		if (extarchive != null) {
+			resultconsumer.accept(extarchive, null);
+			return;
+		}
+		loaderpool.offer(() -> {
+			try {
+				ExternalArchiveReference archive = loadExternalArchive(uri, archivepath, expectedhashes, bundlestorage);
+				resultconsumer.accept(archive, null);
+			} catch (Exception e) {
+				resultconsumer.accept(null, e);
+			}
+		});
 	}
 
 	private ExternalArchiveReference loadExternalArchive(URI uri, Path archivepath, Hashes expectedhashes,
@@ -1385,81 +1492,110 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 		});
 	}
 
+	private ExternalArchiveReference loadEmbeddedArchive(ExternalArchiveReference containingarchive, String ename,
+			Path entrypath, URI archiveuri) throws IOException {
+
+		HashingInputStream[] hashingin = { null };
+		ExternalArchiveReference result = loadExternalArchiveImpl(entrypath, null, null, () -> {
+			InputStream entryis = containingarchive.archive.openEntry(ename);
+			hashingin[0] = new HashingInputStream(entryis);
+			return hashingin[0];
+		});
+		Hashes entryhash;
+		if (hashingin[0] != null) {
+			Hashes hashes = hashingin[0].getHashes();
+			if (hashes != null) {
+				containingarchive.putEntryHash(ename, hashes);
+				entryhash = hashes;
+			} else {
+				entryhash = containingarchive.getEntryHash(ename);
+			}
+		} else {
+			entryhash = containingarchive.getEntryHash(ename);
+		}
+		if (!entryhash.equals(result.hashes)) {
+			throw new IOException("External archive entry hash mismatch: " + ename + " in " + archiveuri);
+		}
+		return result;
+	}
+
 	private ExternalArchiveReference loadExternalArchiveImpl(Path archivepath, Hashes expectedhashes,
 			Object loadexceptioninfo, IOSupplier<InputStream> archiveinputsupplier) throws IOException {
-		ExternalArchiveReference extarchive = repository.externalArchives.get(archivepath);
-		if (extarchive == null) {
-			synchronized (repository.externalArchiveLoadLocks.computeIfAbsent(archivepath,
-					Functionals.objectComputer())) {
-				Hashes loadhashes = null;
-				extarchive = repository.externalArchives.get(archivepath);
-				if (extarchive == null) {
-					Path tempfile = archivepath.resolveSibling(UUID.randomUUID() + ".temp");
-					try {
-						synchronized (("nest-external-dep-load:" + archivepath).intern()) {
-							if (!Files.isRegularFile(archivepath)) {
-								Files.createDirectories(archivepath.getParent());
-								try (InputStream is = archiveinputsupplier.get()) {
-									try (OutputStream out = Files.newOutputStream(tempfile)) {
-										if (is instanceof HashingInputStream) {
-											StreamUtils.copyStream(is, out);
-											loadhashes = ((HashingInputStream) is).getHashes();
-										} else {
-											try (HashingOutputStream hasher = new HashingOutputStream(out)) {
-												StreamUtils.copyStream(is, hasher);
-												loadhashes = hasher.getHashes();
-											}
-										}
-									}
-								}
-								if (expectedhashes != null) {
-									if (expectedhashes.sha256 != null
-											&& !expectedhashes.sha256.equals(loadhashes.sha256)) {
-										throw new IOException("External archive load hash mismatch: "
-												+ loadexceptioninfo + " (SHA-256 expected: " + expectedhashes.sha256
-												+ " actual: " + loadhashes.sha256 + ")");
-									}
-									if (expectedhashes.sha1 != null && !expectedhashes.sha1.equals(loadhashes.sha1)) {
-										throw new IOException("External archive load hash mismatch: "
-												+ loadexceptioninfo + " (SHA-1 expected: " + expectedhashes.sha1
-												+ " actual: " + loadhashes.sha1 + ")");
-									}
-									if (expectedhashes.md5 != null && !expectedhashes.md5.equals(loadhashes.md5)) {
-										throw new IOException("External archive load hash mismatch: "
-												+ loadexceptioninfo + " (MD5 expected: " + expectedhashes.md5
-												+ " actual: " + loadhashes.md5 + ")");
-									}
-								}
-								try {
-									Files.move(tempfile, archivepath);
-								} catch (IOException e) {
-									if (!Files.isRegularFile(archivepath)) {
-										throw e;
-									}
-									//continue, somebody loaded concurrently in other jvm?
+		ExternalArchiveReference extarchive;
+		synchronized (repository.externalArchiveLoadLocks.computeIfAbsent(archivepath, Functionals.objectComputer())) {
+			extarchive = repository.externalArchives.get(archivepath);
+			if (extarchive != null) {
+				return extarchive;
+			}
+			Hashes loadhashes = loadExternalArchiveFromInputImpl(archivepath, expectedhashes, loadexceptioninfo,
+					archiveinputsupplier);
+			JarExternalArchiveImpl jararchive = JarExternalArchiveImpl.create(archivepath);
+			extarchive = createArchiveReference(jararchive);
+			if (loadhashes != null && !loadhashes.equals(extarchive.hashes)) {
+				IOException e = new IOException(
+						"Hash mismatch. External archive was concurrently modified: " + archivepath);
+				IOUtils.closeExc(e, jararchive);
+				throw e;
+			}
+			for (String ename : jararchive.getEntryNames()) {
+				//validate entries
+				BundleUtils.checkArchiveEntryName(ename);
+			}
+			repository.externalArchives.put(archivepath, extarchive);
+		}
+		return extarchive;
+	}
+
+	private static Hashes loadExternalArchiveFromInputImpl(Path archivepath, Hashes expectedhashes,
+			Object loadexceptioninfo, IOSupplier<InputStream> archiveinputsupplier) throws IOException {
+		Hashes loadhashes = null;
+		Path tempfile = archivepath.resolveSibling(UUID.randomUUID() + ".temp");
+		try {
+			synchronized (("nest-external-dep-load:" + archivepath).intern()) {
+				if (!Files.isRegularFile(archivepath)) {
+					Files.createDirectories(archivepath.getParent());
+					try (InputStream is = archiveinputsupplier.get()) {
+						try (OutputStream out = Files.newOutputStream(tempfile)) {
+							if (is instanceof HashingInputStream) {
+								StreamUtils.copyStream(is, out);
+								loadhashes = ((HashingInputStream) is).getHashes();
+							} else {
+								try (HashingOutputStream hasher = new HashingOutputStream(out)) {
+									StreamUtils.copyStream(is, hasher);
+									loadhashes = hasher.getHashes();
 								}
 							}
 						}
-					} finally {
-						Files.deleteIfExists(tempfile);
 					}
-					JarExternalArchiveImpl jararchive = JarExternalArchiveImpl.create(archivepath);
-					extarchive = createArchiveReference(jararchive);
-					if (loadhashes != null && !loadhashes.equals(extarchive.hashes)) {
-						IOException e = new IOException(
-								"Hash mismatch. External archive was concurrently modified: " + archivepath);
-						IOUtils.closeExc(e, jararchive);
-						throw e;
+					if (expectedhashes != null) {
+						if (expectedhashes.sha256 != null && !expectedhashes.sha256.equals(loadhashes.sha256)) {
+							throw new IOException(
+									"External archive load hash mismatch: " + loadexceptioninfo + " (SHA-256 expected: "
+											+ expectedhashes.sha256 + " actual: " + loadhashes.sha256 + ")");
+						}
+						if (expectedhashes.sha1 != null && !expectedhashes.sha1.equals(loadhashes.sha1)) {
+							throw new IOException("External archive load hash mismatch: " + loadexceptioninfo
+									+ " (SHA-1 expected: " + expectedhashes.sha1 + " actual: " + loadhashes.sha1 + ")");
+						}
+						if (expectedhashes.md5 != null && !expectedhashes.md5.equals(loadhashes.md5)) {
+							throw new IOException("External archive load hash mismatch: " + loadexceptioninfo
+									+ " (MD5 expected: " + expectedhashes.md5 + " actual: " + loadhashes.md5 + ")");
+						}
 					}
-					for (String ename : jararchive.getEntryNames()) {
-						//validate entries
-						BundleUtils.checkArchiveEntryName(ename);
+					try {
+						Files.move(tempfile, archivepath);
+					} catch (IOException e) {
+						if (!Files.isRegularFile(archivepath)) {
+							throw e;
+						}
+						//continue, somebody loaded concurrently in other jvm?
 					}
-					repository.externalArchives.put(archivepath, extarchive);
 				}
 			}
+		} finally {
+			Files.deleteIfExists(tempfile);
 		}
-		return extarchive;
+		return loadhashes;
 	}
 
 	private static ExternalArchiveReference createArchiveReference(JarExternalArchiveImpl archive) throws IOException {
@@ -1495,10 +1631,8 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			if (ObjectUtils.isNullOrEmpty(entries)) {
 				continue;
 			}
-			for (WildcardPath wc : entries) {
-				if (wc.includes(name)) {
-					return true;
-				}
+			if (isWildcardsInclude(name, entries)) {
+				return true;
 			}
 		}
 		return false;

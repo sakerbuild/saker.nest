@@ -307,7 +307,7 @@ public final class ExternalDependencyInformation implements Externalizable {
 		try {
 			byte[] hash = StringUtils.parseHexString(hashval);
 			if (hash.length != 32) {
-				throw new IllegalArgumentException("Invalid SHA-256 hash length: " + hash.length + " expected 32");
+				throw new IllegalArgumentException("Invalid SHA-256 hash length: " + hash.length + " expected 32 bytes");
 			}
 		} catch (Exception e) {
 			throw new IllegalArgumentException("Failed to parse SHA-256 hash: " + hashval, e);
@@ -318,7 +318,7 @@ public final class ExternalDependencyInformation implements Externalizable {
 		try {
 			byte[] hash = StringUtils.parseHexString(hashval);
 			if (hash.length != 20) {
-				throw new IllegalArgumentException("Invalid SHA-1 hash length: " + hash.length + " expected 20");
+				throw new IllegalArgumentException("Invalid SHA-1 hash length: " + hash.length + " expected 20 bytes");
 			}
 		} catch (Exception e) {
 			throw new IllegalArgumentException("Failed to parse SHA-1 hash: " + hashval, e);
@@ -329,7 +329,7 @@ public final class ExternalDependencyInformation implements Externalizable {
 		try {
 			byte[] hash = StringUtils.parseHexString(hashval);
 			if (hash.length != 16) {
-				throw new IllegalArgumentException("Invalid MD5 hash length: " + hash.length + " expected 16");
+				throw new IllegalArgumentException("Invalid MD5 hash length: " + hash.length + " expected 16 bytes");
 			}
 		} catch (Exception e) {
 			throw new IllegalArgumentException("Failed to parse MD5 hash: " + hashval, e);
