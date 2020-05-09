@@ -32,7 +32,7 @@ import saker.build.thirdparty.saker.util.classloader.ClassLoaderResolver;
 import saker.build.thirdparty.saker.util.classloader.ClassLoaderResolverRegistry;
 import saker.build.thirdparty.saker.util.classloader.SingleClassLoaderResolver;
 import saker.nest.bundle.BundleIdentifier;
-import saker.nest.bundle.ExternalArchiveKey;
+import saker.nest.bundle.SimpleExternalArchiveKey;
 import saker.nest.bundle.NestRepositoryBundleClassLoader;
 import saker.nest.bundle.NestRepositoryBundleClassLoader.DependentClassLoader;
 import saker.nest.bundle.NestRepositoryExternalArchiveClassLoader;
@@ -70,7 +70,7 @@ public class NestBuildRepositoryImpl implements BuildRepository {
 					return null;
 				}
 				String hash = StringUtils.toHexString(owner.getSharedBundleHashWithClassPathDependencies());
-				ExternalArchiveKey archivekey = extcl.getArchive().getArchiveKey();
+				SimpleExternalArchiveKey archivekey = extcl.getArchive().getArchiveKey();
 
 				JSONObject json = new JSONObject();
 				json.put("hash", hash);
@@ -121,7 +121,7 @@ public class NestBuildRepositoryImpl implements BuildRepository {
 					return null;
 				}
 				String entryname = json.optString("entry", null);
-				ExternalArchiveKey archivekey = new ExternalArchiveKey(uri, entryname);
+				SimpleExternalArchiveKey archivekey = new SimpleExternalArchiveKey(uri, entryname);
 				DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader> depcl = bundlecl
 						.getExternalDependencyClassLoaders().get(archivekey);
 				if (depcl == null) {

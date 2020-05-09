@@ -41,6 +41,7 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.zip.ZipEntry;
 
+import saker.build.file.path.WildcardPath;
 import saker.build.task.TaskName;
 import saker.build.thirdparty.saker.util.ImmutableUtils;
 import saker.build.thirdparty.saker.util.ObjectUtils;
@@ -252,6 +253,12 @@ public class BundleUtils {
 			return Collections.emptyNavigableMap();
 		}
 		NavigableMap<URI, Hashes> result = new TreeMap<>();
+		collectExternalDependencyInformationHashes(depinfo, result);
+		return result;
+	}
+
+	private static void collectExternalDependencyInformationHashes(ExternalDependencyInformation depinfo,
+			NavigableMap<URI, Hashes> result) {
 		for (Entry<URI, ? extends ExternalDependencyList> entry : depinfo.getDependencies().entrySet()) {
 			ExternalDependencyList deplist = entry.getValue();
 			result.compute(entry.getKey(), (uri, v) -> {
@@ -274,8 +281,6 @@ public class BundleUtils {
 				});
 			}
 		}
-
-		return result;
 	}
 
 	private static Hashes merge(Hashes first, Hashes second, Object context) {
@@ -316,6 +321,15 @@ public class BundleUtils {
 
 	private BundleUtils() {
 		throw new UnsupportedOperationException();
+	}
+
+	public static boolean isWildcardsInclude(String name, Iterable<? extends WildcardPath> wildcards) {
+		for (WildcardPath wc : wildcards) {
+			if (wc.includes(name)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 }

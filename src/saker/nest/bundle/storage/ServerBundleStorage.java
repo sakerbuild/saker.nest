@@ -92,11 +92,14 @@ import saker.nest.bundle.AbstractNestRepositoryBundle;
 import saker.nest.bundle.BundleIdentifier;
 import saker.nest.bundle.BundleInformation;
 import saker.nest.bundle.BundleUtils;
+import saker.nest.bundle.ExternalArchive;
+import saker.nest.bundle.ExternalArchiveKey;
 import saker.nest.bundle.ExternalDependencyInformation;
 import saker.nest.bundle.Hashes;
 import saker.nest.bundle.JarNestRepositoryBundleImpl;
 import saker.nest.bundle.NestRepositoryBundle;
 import saker.nest.exc.BundleLoadingFailedException;
+import saker.nest.exc.ExternalArchiveLoadingFailedException;
 import saker.nest.exc.InvalidNestBundleException;
 import saker.nest.exc.OfflineStorageIOException;
 import saker.nest.thirdparty.org.json.JSONArray;
@@ -160,7 +163,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 
 		@Override
 		public AbstractBundleStorage getStorage(NestRepositoryImpl repository) {
-			return new ServerBundleStorage(this);
+			return new ServerBundleStorage(this, repository);
 		}
 
 		public String getServerHost() {
@@ -244,6 +247,8 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 	private static final int VERIFICATION_STATE_FAILED = 3;
 	private static final VerificationState SIGNATURE_VERIFIED = new VerificationState(VERIFICATION_STATE_VERIFIED,
 			false);
+
+	private final NestRepositoryImpl repository;
 
 	private static class VerificationState {
 		protected final int state;
@@ -397,8 +402,9 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 
 	}
 
-	public ServerBundleStorage(ServerStorageKey storagekey) {
+	public ServerBundleStorage(ServerStorageKey storagekey, NestRepositoryImpl repository) {
 		this.storageKey = storagekey;
+		this.repository = repository;
 		this.serverHost = storagekey.serverHost;
 		this.storageDirectory = LocalFileProvider.toRealPath(storagekey.storageDirectory);
 		this.bundlesDirectory = storageDirectory.resolve(BUNDLES_DIRECTORY_NAME);
@@ -1838,6 +1844,13 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		@Override
 		public String getServerHost() {
 			return ServerBundleStorage.this.getServerHost();
+		}
+
+		@Override
+		public Map<? extends ExternalArchiveKey, ? extends ExternalArchive> loadExternalArchives(
+				ExternalDependencyInformation depinfo)
+				throws NullPointerException, IllegalArgumentException, ExternalArchiveLoadingFailedException {
+			return repository.loadExternalArchives(depinfo, this);
 		}
 
 		@Override

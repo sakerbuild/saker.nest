@@ -46,6 +46,7 @@ public class ExternalArchiveResolvingNestMetric extends BasicServerNestMetric {
 
 							@Override
 							public InputStream getInputStream() throws IOException {
+								System.out.println("Open " + uri);
 								ByteArrayRegion bytes = uriBytes.get(uri);
 								if (bytes != null) {
 									return new UnsyncByteArrayInputStream(bytes);

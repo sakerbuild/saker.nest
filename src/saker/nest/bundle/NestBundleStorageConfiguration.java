@@ -15,6 +15,7 @@
  */
 package saker.nest.bundle;
 
+import java.io.IOException;
 import java.util.Map;
 
 import saker.apiextract.api.PublicApi;
@@ -35,6 +36,7 @@ import saker.nest.bundle.storage.ServerBundleStorageView;
 import saker.nest.bundle.storage.StorageViewKey;
 import saker.nest.exc.BundleDependencyUnsatisfiedException;
 import saker.nest.exc.BundleLoadingFailedException;
+import saker.nest.exc.ExternalArchiveLoadingFailedException;
 
 /**
  * The main interface that encloses configured bundle storages and provides access to them.

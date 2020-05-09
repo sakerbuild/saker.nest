@@ -86,11 +86,15 @@ import saker.nest.bundle.AbstractNestRepositoryBundle;
 import saker.nest.bundle.BundleIdentifier;
 import saker.nest.bundle.BundleInformation;
 import saker.nest.bundle.BundleUtils;
+import saker.nest.bundle.ExternalArchive;
+import saker.nest.bundle.ExternalArchiveKey;
+import saker.nest.bundle.ExternalDependencyInformation;
 import saker.nest.bundle.JarNestRepositoryBundleImpl;
 import saker.nest.bundle.NestRepositoryBundle;
 import saker.nest.bundle.storage.LocalBundleStorageView.InstallResult;
 import saker.nest.exc.BundleLoadingFailedException;
 import saker.nest.exc.BundleStorageInitializationException;
+import saker.nest.exc.ExternalArchiveLoadingFailedException;
 import saker.nest.exc.InvalidNestBundleException;
 
 public class LocalBundleStorage extends AbstractBundleStorage {
@@ -130,7 +134,7 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 
 		@Override
 		public AbstractBundleStorage getStorage(NestRepositoryImpl repository) {
-			return new LocalBundleStorage(this);
+			return new LocalBundleStorage(this, repository);
 		}
 
 		@Override
@@ -219,9 +223,11 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 	private final ConcurrentNavigableMap<BundleIdentifier, PendingBundleInfoState> pendingBundleInfoStates = new ConcurrentSkipListMap<>();
 
 	private final Object detectChangeLock = new Object();
+	private final NestRepositoryImpl repository;
 
-	public LocalBundleStorage(LocalStorageKey storagekey) {
+	public LocalBundleStorage(LocalStorageKey storagekey, NestRepositoryImpl repository) {
 		this.storageKey = storagekey;
+		this.repository = repository;
 		this.storageDirectory = LocalFileProvider.toRealPath(storagekey.storageDirectory);
 
 		pendingDirectory = storageDirectory.resolve(PENDING_DIRECTORY_NAME);
@@ -972,6 +978,13 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 		@Override
 		public void appendConfigurationUserParameters(Map<String, String> userparameters, String repositoryid,
 				String storagename) {
+		}
+
+		@Override
+		public Map<? extends ExternalArchiveKey, ? extends ExternalArchive> loadExternalArchives(
+				ExternalDependencyInformation depinfo)
+				throws NullPointerException, IllegalArgumentException, ExternalArchiveLoadingFailedException {
+			return repository.loadExternalArchives(depinfo, this);
 		}
 
 		@Override

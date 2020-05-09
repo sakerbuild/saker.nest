@@ -102,7 +102,7 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 	 * Unmodifiable map of dependency class loaders.
 	 */
 	private final Map<BundleKey, DependentClassLoader<? extends NestRepositoryBundleClassLoader>> dependencyClassLoaders;
-	private final Map<ExternalArchiveKey, DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> externalDependencyClassLoaders;
+	private final Map<SimpleExternalArchiveKey, DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> externalDependencyClassLoaders;
 	private final BundleLookup relativeBundleLookup;
 
 	private final ConcurrentSkipListMap<String, Class<?>> bundleLoadedClasses = new ConcurrentSkipListMap<>();
@@ -114,7 +114,7 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 			BundleKey bundlekey, AbstractNestRepositoryBundle bundle,
 			Map<BundleKey, ? extends DependentClassLoader<? extends NestRepositoryBundleClassLoader>> dependencyClassLoaders,
 			BundleLookup relativeBundleLookup,
-			Map<ExternalArchiveKey, DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> externalDependencyClassLoaders) {
+			Map<SimpleExternalArchiveKey, DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> externalDependencyClassLoaders) {
 		super(parent, new NestBundleClassLoaderDataFinder(bundle));
 		this.configuredStorage = configuredStorage;
 		this.bundleKey = bundlekey;
@@ -124,7 +124,7 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 		this.externalDependencyClassLoaders = ImmutableUtils.unmodifiableMap(externalDependencyClassLoaders);
 	}
 
-	public Map<ExternalArchiveKey, DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> getExternalDependencyClassLoaders() {
+	public Map<SimpleExternalArchiveKey, DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> getExternalDependencyClassLoaders() {
 		return externalDependencyClassLoaders;
 	}
 

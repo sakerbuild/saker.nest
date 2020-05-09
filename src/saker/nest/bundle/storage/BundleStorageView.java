@@ -15,15 +15,20 @@
  */
 package saker.nest.bundle.storage;
 
+import java.io.IOException;
 import java.util.Map;
 import java.util.Set;
 
 import saker.apiextract.api.PublicApi;
 import saker.nest.bundle.BundleIdentifier;
 import saker.nest.bundle.BundleInformation;
+import saker.nest.bundle.ExternalArchive;
+import saker.nest.bundle.ExternalArchiveKey;
+import saker.nest.bundle.ExternalDependencyInformation;
 import saker.nest.bundle.NestBundleStorageConfiguration;
 import saker.nest.bundle.NestRepositoryBundle;
 import saker.nest.exc.BundleLoadingFailedException;
+import saker.nest.exc.ExternalArchiveLoadingFailedException;
 
 /**
  * Interface for providing configured access to a backing {@linkplain BundleStorage bundle storage}.
@@ -148,4 +153,8 @@ public interface BundleStorageView {
 	 */
 	public Map<String, ? extends Set<? extends BundleIdentifier>> lookupBundleIdentifiers(String bundlename)
 			throws NullPointerException, IllegalArgumentException;
+
+	public Map<? extends ExternalArchiveKey, ? extends ExternalArchive> loadExternalArchives(
+			ExternalDependencyInformation depinfo)
+			throws NullPointerException, IllegalArgumentException, IOException, ExternalArchiveLoadingFailedException;
 }

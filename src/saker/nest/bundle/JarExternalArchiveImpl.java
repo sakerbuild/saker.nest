@@ -33,21 +33,21 @@ import saker.build.thirdparty.saker.util.io.JarFileUtils;
 import saker.build.thirdparty.saker.util.io.SerialUtils;
 
 public class JarExternalArchiveImpl extends AbstractExternalArchive implements JarExternalArchive {
-	private final ExternalArchiveKey archiveKey;
+	private final SimpleExternalArchiveKey archiveKey;
 	private final SeekableByteChannel channel;
 	private final JarFile jar;
 	private final LazySupplier<NavigableSet<String>> entryNames;
 
 	private final LazySupplier<byte[]> jarHash = LazySupplier.of(this::computeJarHash);
 
-	private JarExternalArchiveImpl(ExternalArchiveKey archiveKey, SeekableByteChannel channel, JarFile jar) {
+	private JarExternalArchiveImpl(SimpleExternalArchiveKey archiveKey, SeekableByteChannel channel, JarFile jar) {
 		this.archiveKey = archiveKey;
 		this.channel = channel;
 		this.jar = jar;
 		this.entryNames = LazySupplier.of(() -> BundleUtils.getJarEntryNames(jar));
 	}
 
-	public static JarExternalArchiveImpl create(ExternalArchiveKey archiveKey, Path jarpath) throws IOException {
+	public static JarExternalArchiveImpl create(SimpleExternalArchiveKey archiveKey, Path jarpath) throws IOException {
 		SeekableByteChannel channel = BundleUtils.openExclusiveChannelForJar(jarpath);
 		try {
 			JarFile jarfile = JarFileUtils.createMultiReleaseJarFile(jarpath);
@@ -64,7 +64,7 @@ public class JarExternalArchiveImpl extends AbstractExternalArchive implements J
 	}
 
 	@Override
-	public ExternalArchiveKey getArchiveKey() {
+	public SimpleExternalArchiveKey getArchiveKey() {
 		return archiveKey;
 	}
 

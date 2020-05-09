@@ -30,9 +30,13 @@ import saker.build.runtime.repository.TaskNotFoundException;
 import saker.build.task.TaskName;
 import saker.nest.bundle.AbstractNestRepositoryBundle;
 import saker.nest.bundle.BundleIdentifier;
+import saker.nest.bundle.ExternalArchive;
+import saker.nest.bundle.ExternalArchiveKey;
+import saker.nest.bundle.ExternalDependencyInformation;
 import saker.nest.bundle.Hashes;
 import saker.nest.bundle.NestRepositoryBundle;
 import saker.nest.exc.BundleLoadingFailedException;
+import saker.nest.exc.ExternalArchiveLoadingFailedException;
 import testing.saker.nest.TestFlag;
 
 public abstract class AbstractBundleStorageView implements BundleStorageView {
@@ -90,4 +94,9 @@ public abstract class AbstractBundleStorageView implements BundleStorageView {
 		}
 		return conn.getInputStream();
 	}
+
+	@Override
+	public abstract Map<? extends ExternalArchiveKey, ? extends ExternalArchive> loadExternalArchives(
+			ExternalDependencyInformation depinfo)
+			throws NullPointerException, IllegalArgumentException, ExternalArchiveLoadingFailedException;
 }
