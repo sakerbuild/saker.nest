@@ -466,7 +466,7 @@ public final class ExternalDependencyInformation implements Externalizable {
 					}
 					return;
 				}
-				if ("target".equals(name)) {
+				if ("target".equalsIgnoreCase(name)) {
 					for (String wc : Pattern.compile("[;]+").split(content)) {
 						if (wc.isEmpty()) {
 							continue;
