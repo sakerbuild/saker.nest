@@ -18,6 +18,7 @@ package saker.nest.bundle.storage;
 import java.io.BufferedReader;
 import java.io.Closeable;
 import java.io.Externalizable;
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -27,6 +28,7 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.UnsupportedEncodingException;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.channels.Channels;
@@ -88,10 +90,16 @@ import saker.nest.ConfiguredRepositoryStorage;
 import saker.nest.NestRepositoryImpl;
 import saker.nest.bundle.AbstractNestRepositoryBundle;
 import saker.nest.bundle.BundleIdentifier;
+import saker.nest.bundle.BundleInformation;
 import saker.nest.bundle.BundleUtils;
+import saker.nest.bundle.ExternalArchive;
+import saker.nest.bundle.ExternalArchiveKey;
+import saker.nest.bundle.ExternalDependencyInformation;
+import saker.nest.bundle.Hashes;
 import saker.nest.bundle.JarNestRepositoryBundleImpl;
 import saker.nest.bundle.NestRepositoryBundle;
 import saker.nest.exc.BundleLoadingFailedException;
+import saker.nest.exc.ExternalArchiveLoadingFailedException;
 import saker.nest.exc.InvalidNestBundleException;
 import saker.nest.exc.OfflineStorageIOException;
 import saker.nest.thirdparty.org.json.JSONArray;
@@ -155,7 +163,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 
 		@Override
 		public AbstractBundleStorage getStorage(NestRepositoryImpl repository) {
-			return new ServerBundleStorage(this);
+			return new ServerBundleStorage(this, repository);
 		}
 
 		public String getServerHost() {
@@ -239,6 +247,8 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 	private static final int VERIFICATION_STATE_FAILED = 3;
 	private static final VerificationState SIGNATURE_VERIFIED = new VerificationState(VERIFICATION_STATE_VERIFIED,
 			false);
+
+	private final NestRepositoryImpl repository;
 
 	private static class VerificationState {
 		protected final int state;
@@ -392,8 +402,9 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 
 	}
 
-	public ServerBundleStorage(ServerStorageKey storagekey) {
+	public ServerBundleStorage(ServerStorageKey storagekey, NestRepositoryImpl repository) {
 		this.storageKey = storagekey;
+		this.repository = repository;
 		this.serverHost = storagekey.serverHost;
 		this.storageDirectory = LocalFileProvider.toRealPath(storagekey.storageDirectory);
 		this.bundlesDirectory = storageDirectory.resolve(BUNDLES_DIRECTORY_NAME);
@@ -618,12 +629,15 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 
 	private static <T> T makeServerRequest(boolean offline, String requesturl, ServerRequestHandler<T> handler)
 			throws IOException {
-		return makeServerRequest(offline, requesturl, null, handler);
+		return makeServerRequest(offline ? FLAG_REQUEST_OFFLINE : 0, requesturl, null, handler);
 	}
 
-	private static <T> T makeServerRequest(boolean offline, String requesturl, String method,
-			ServerRequestHandler<T> handler) throws IOException {
-		if (offline) {
+	private static final int FLAG_REQUEST_OFFLINE = 1 << 0;
+	private static final int FLAG_REQUEST_NO_DISCONNECT_ON_200 = 1 << 1;
+
+	private static <T> T makeServerRequest(int flags, String requesturl, String method, ServerRequestHandler<T> handler)
+			throws IOException {
+		if (((flags & FLAG_REQUEST_OFFLINE) == FLAG_REQUEST_OFFLINE)) {
 			throw new OfflineStorageIOException("Failed to make request in offline mode. (" + requesturl + ")");
 		}
 		try {
@@ -658,7 +672,9 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 						() -> unGzipizeInputStream(connection, connection.getErrorStream()),
 						connection::getHeaderField);
 			} finally {
-				connection.disconnect();
+				if (rc != 200 || ((flags & FLAG_REQUEST_NO_DISCONNECT_ON_200) != FLAG_REQUEST_NO_DISCONNECT_ON_200)) {
+					connection.disconnect();
+				}
 			}
 		} catch (IOException e) {
 			throw new IOException("Failed to execute server request. (" + requesturl + ")", e);
@@ -826,8 +842,8 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		}
 		SeekableByteChannel channel = bundle.getChannel();
 		if (channel == null) {
-			throw new BundleLoadingFailedException("Failed to verify bundle: " + bundle.getBundleIdentifier()
-					+ ", no exclusive file channel available. Concurrent file modifications cannot be prevented.");
+			throw new BundleLoadingFailedException(
+					"Failed to verify bundle: " + bundle.getBundleIdentifier() + ", no file channel available.");
 		}
 		try {
 			Signature signature;
@@ -851,6 +867,8 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 						"Failed to verify, invalid bundle signature: " + bundle.getBundleIdentifier());
 			}
 			return;
+		} catch (BundleLoadingFailedException e) {
+			throw e;
 		} catch (Exception e) {
 			throw new BundleLoadingFailedException("Failed to verify bundle signature: " + bundle.getBundleIdentifier(),
 					e);
@@ -860,14 +878,15 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 	private BundleSignatureHolder downloadBundleSignature(BundleIdentifier bundleid, boolean offline)
 			throws IOException {
 		String requesturl = getBundleDownloadURL(bundleid);
-		return makeServerRequest(offline, requesturl, "HEAD", (rc, ins, errs, headerfunc) -> {
-			if (rc == HttpURLConnection.HTTP_OK) {
-				//HTTP OK
-				return BundleSignatureHolder.fromHeaders(headerfunc.apply("Nest-Bundle-Signature"),
-						headerfunc.apply("Nest-Bundle-Signature-Version"));
-			}
-			return null;
-		});
+		return makeServerRequest(offline ? FLAG_REQUEST_OFFLINE : 0, requesturl, "HEAD",
+				(rc, ins, errs, headerfunc) -> {
+					if (rc == HttpURLConnection.HTTP_OK) {
+						//HTTP OK
+						return BundleSignatureHolder.fromHeaders(headerfunc.apply("Nest-Bundle-Signature"),
+								headerfunc.apply("Nest-Bundle-Signature-Version"));
+					}
+					return null;
+				});
 	}
 
 	private static class DownloadedBundle {
@@ -912,8 +931,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 							//we can continue execution, as we verify the contents of the JAR before opening it
 						}
 						try {
-							JarNestRepositoryBundleImpl result = JarNestRepositoryBundleImpl.create(this,
-									resultjarpath);
+							JarNestRepositoryBundleImpl result = createBundle(resultjarpath);
 
 							try {
 								if (!bundleid.equals(result.getBundleIdentifier())) {
@@ -969,6 +987,27 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		} catch (IOException e) {
 			throw new BundleLoadingFailedException("Failed to download bundle: " + bundleid, e);
 		}
+	}
+
+	private JarNestRepositoryBundleImpl createBundle(Path resultjarpath) throws IOException {
+		//require that all external dependencies have sha-256 defined for them
+
+		JarNestRepositoryBundleImpl result = JarNestRepositoryBundleImpl.create(this, resultjarpath);
+		try {
+			BundleInformation info = result.getInformation();
+			ExternalDependencyInformation extdeps = info.getExternalDependencyInformation();
+			for (Entry<URI, Hashes> entry : BundleUtils.getExternalDependencyInformationHashes(extdeps).entrySet()) {
+				if (entry.getValue().sha256 == null) {
+					throw new InvalidNestBundleException("Bundle " + info.getBundleIdentifier()
+							+ " declares external dependency without SHA-256 hash value: " + entry.getKey());
+				}
+			}
+		} catch (Throwable e) {
+			//close the jar in case of exceptions
+			IOUtils.addExc(e, IOUtils.closeExc(result));
+			throw e;
+		}
+		return result;
 	}
 
 	private static String readErrorStreamOrEmpty(IOSupplier<? extends InputStream> errstream) throws IOException {
@@ -1814,6 +1853,49 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		}
 
 		@Override
+		public Map<? extends ExternalArchiveKey, ? extends ExternalArchive> loadExternalArchives(
+				ExternalDependencyInformation depinfo)
+				throws NullPointerException, IllegalArgumentException, ExternalArchiveLoadingFailedException {
+			return repository.loadExternalArchives(depinfo, this);
+		}
+
+		@Override
+		public InputStream openExternalDependencyURI(URI uri, Hashes expectedhashes) throws IOException {
+			if (expectedhashes == null || expectedhashes.sha256 == null) {
+				throw new FileNotFoundException("Failed to download external dependency without SHA-256: " + uri);
+			}
+			String url = serverHost + "/external/mirror/" + BundleUtils.sha256(uri) + "/" + expectedhashes.sha256;
+			return makeServerRequest((offline ? FLAG_REQUEST_OFFLINE : 0) | FLAG_REQUEST_NO_DISCONNECT_ON_200, url,
+					"GET", (rc, ins, errs, headerfunc) -> {
+						if (rc == HttpURLConnection.HTTP_OK) {
+							//HTTP OK
+							return ins.get();
+						}
+						IOException ee = null;
+						String errcontent = "";
+						try {
+							errcontent = StreamUtils.readStreamStringFully(errs.get());
+						} catch (IOException e) {
+							ee = e;
+						}
+						StringBuilder sb = new StringBuilder();
+						sb.append("Failed to download external dependency: ");
+						sb.append(uri);
+						sb.append(" from ");
+						sb.append(url);
+						sb.append(" Response code: ");
+						sb.append(rc);
+						if (!errcontent.isEmpty()) {
+							sb.append(" Response content: ");
+							sb.append(errcontent);
+						}
+						IOException exc = new IOException(sb.toString());
+						IOUtils.addExc(exc, ee);
+						throw exc;
+					});
+		}
+
+		@Override
 		public void appendConfigurationUserParameters(Map<String, String> userparameters, String repositoryid,
 				String storagename) {
 			userparameters.put(repositoryid + "." + storagename + "." + PARAMETER_OFFLINE, Boolean.toString(offline));
@@ -1951,8 +2033,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 				Path bundlejarpath = BundleUtils.getVersionedBundleJarPath(bundlesDirectory, bundleid);
 				if (Files.isRegularFile(bundlejarpath)) {
 					try {
-						JarNestRepositoryBundleImpl created = JarNestRepositoryBundleImpl
-								.create(ServerBundleStorage.this, bundlejarpath);
+						JarNestRepositoryBundleImpl created = createBundle(bundlejarpath);
 						try {
 							if (!bundleid.equals(created.getBundleIdentifier())) {
 								throw new BundleLoadingFailedException("Bundle identifier mismatch: "

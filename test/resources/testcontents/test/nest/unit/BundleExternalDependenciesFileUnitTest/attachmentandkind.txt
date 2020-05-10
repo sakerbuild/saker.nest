@@ -1,0 +1,3 @@
+https://example.com/myjar.jar
+    classpath
+    source-attachment: https://example.com/myjar-sources.jar

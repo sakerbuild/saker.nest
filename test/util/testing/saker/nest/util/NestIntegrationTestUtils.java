@@ -18,7 +18,7 @@ package testing.saker.nest.util;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.nio.file.NoSuchFileException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.security.KeyPair;
@@ -36,6 +36,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
+import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 
 import saker.build.file.StreamWritable;
@@ -48,6 +49,7 @@ import saker.build.file.provider.SakerFileProvider;
 import saker.build.runtime.execution.ExecutionParametersImpl;
 import saker.build.thirdparty.saker.util.ObjectUtils;
 import saker.build.thirdparty.saker.util.ReflectUtils;
+import saker.build.thirdparty.saker.util.StringUtils;
 import saker.build.thirdparty.saker.util.io.ByteArrayRegion;
 import saker.build.thirdparty.saker.util.io.ByteSink;
 import saker.build.thirdparty.saker.util.io.ByteSource;
@@ -77,6 +79,10 @@ public class NestIntegrationTestUtils {
 		}
 	}
 
+	public static ByteArrayRegion createJarBytesWithClasses(Set<Class<?>> addclasses) throws IOException {
+		return createJarBytesFromDirectoryWithClasses(null, null, addclasses);
+	}
+
 	public static ByteArrayRegion createJarBytesFromDirectoryWithClasses(SakerFileProvider fp, SakerPath directory,
 			Set<Class<?>> addclasses) throws IOException {
 		StreamWritable sw = createStreamWritableJarFromDirectoryWithClasses(fp, directory, addclasses);
@@ -86,19 +92,54 @@ public class NestIntegrationTestUtils {
 		}
 	}
 
+	public static ByteArrayRegion createJarWithEntries(Map<SakerPath, ByteArrayRegion> entries) {
+		UnsyncByteArrayOutputStream baos = new UnsyncByteArrayOutputStream();
+		try (JarOutputStream jaros = new JarOutputStream(baos)) {
+			for (Entry<SakerPath, ByteArrayRegion> entry : entries.entrySet()) {
+				ZipEntry ze = new ZipEntry(entry.getKey().toString());
+				ze.setLastModifiedTime(DEFAULT_ENTRY_MODIFICATION_TIME);
+				jaros.putNextEntry(ze);
+				entry.getValue().writeTo(jaros);
+				jaros.closeEntry();
+			}
+		} catch (Exception e) {
+			throw new AssertionError(e);
+		}
+		return baos.toByteArrayRegion();
+	}
+
+	public static void addClassesAsEntries(Map<SakerPath, ByteArrayRegion> entries, Class<?>... classes) {
+		for (Class<?> c : classes) {
+			entries.put(SakerPath.valueOf(c.getName().replace('.', '/') + ".class"),
+					ReflectUtils.getClassBytesUsingClassLoader(c));
+		}
+	}
+
+	public static <S> void addServices(Map<SakerPath, ByteArrayRegion> entries, Class<S> serviceclass,
+			Class<?>... classes) {
+		SakerPath servicefilepath = SakerPath.valueOf("META-INF/services/" + serviceclass.getName());
+		entries.put(servicefilepath,
+				ByteArrayRegion.wrap(StringUtils
+						.toStringJoin("\n",
+								Stream.of(classes).map(c -> c.asSubclass(serviceclass)).map(Class::getName).iterator())
+						.getBytes(StandardCharsets.UTF_8)));
+	}
+
 	public static StreamWritable createStreamWritableJarFromDirectoryWithClasses(SakerFileProvider fp,
 			SakerPath directory, Set<Class<?>> addclasses) throws IOException {
-		NavigableMap<SakerPath, ? extends FileEntry> entries = fp.getDirectoryEntriesRecursively(directory);
+		NavigableMap<SakerPath, ? extends FileEntry> entries = fp == null ? new TreeMap<>()
+				: fp.getDirectoryEntriesRecursively(directory);
 		SakerPath manifestpath = SakerPath.valueOf(MANIFEST_PATH);
 		FileEntry manifest = entries.remove(manifestpath);
-		if (manifest == null) {
-			throw new NoSuchFileException(directory.resolve(manifestpath).toString(), null, "Manifest file not found.");
-		}
 		Manifest mf;
-		try (ByteSource fileinput = fp.openInput(directory.resolve(manifestpath));
-				InputStream manifestis = ByteSource.toInputStream(fileinput)) {
-			mf = new Manifest();
-			mf.read(manifestis);
+		if (manifest != null) {
+			try (ByteSource fileinput = fp.openInput(directory.resolve(manifestpath));
+					InputStream manifestis = ByteSource.toInputStream(fileinput)) {
+				mf = new Manifest();
+				mf.read(manifestis);
+			}
+		} else {
+			mf = null;
 		}
 		NavigableMap<String, Class<?>> classes;
 		if (ObjectUtils.isNullOrEmpty(addclasses)) {
@@ -114,11 +155,13 @@ public class NestIntegrationTestUtils {
 		}
 		return os -> {
 			try (JarOutputStream jaros = new JarOutputStream(StreamUtils.closeProtectedOutputStream(os))) {
-				ZipEntry manifestze = new ZipEntry(MANIFEST_PATH);
-				manifestze.setLastModifiedTime(DEFAULT_ENTRY_MODIFICATION_TIME);
-				jaros.putNextEntry(manifestze);
-				mf.write(jaros);
-				jaros.closeEntry();
+				if (mf != null) {
+					ZipEntry manifestze = new ZipEntry(MANIFEST_PATH);
+					manifestze.setLastModifiedTime(DEFAULT_ENTRY_MODIFICATION_TIME);
+					jaros.putNextEntry(manifestze);
+					mf.write(jaros);
+					jaros.closeEntry();
+				}
 
 				for (Entry<SakerPath, ? extends FileEntry> entry : entries.entrySet()) {
 					if (!entry.getValue().isRegularFile()) {

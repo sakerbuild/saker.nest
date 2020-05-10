@@ -1,0 +1,12 @@
+https://example.com/external_v8.jar
+	classpath
+		jre-version: 8
+https://example.com/external_v9.jar
+	classpath
+		jre-version: 9
+https://example.com/external_x86.jar
+	classpath
+		native-architecture: x86
+https://example.com/external_amd64.jar
+	classpath
+		native-architecture: amd64

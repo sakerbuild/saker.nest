@@ -15,15 +15,86 @@
  */
 package saker.nest.bundle;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
+import java.net.ProtocolException;
+import java.net.URI;
+import java.net.URL;
+import java.net.URLConnection;
+import java.nio.channels.SeekableByteChannel;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.OpenOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Collections;
+import java.util.Enumeration;
+import java.util.Map.Entry;
+import java.util.NavigableMap;
 import java.util.NavigableSet;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
+import java.util.zip.ZipEntry;
 
+import saker.build.file.path.WildcardPath;
 import saker.build.task.TaskName;
+import saker.build.thirdparty.saker.util.ImmutableUtils;
 import saker.build.thirdparty.saker.util.ObjectUtils;
+import saker.build.thirdparty.saker.util.StringUtils;
+import saker.build.thirdparty.saker.util.classloader.MultiClassLoader;
+import saker.build.thirdparty.saker.util.io.ByteArrayRegion;
+import saker.build.thirdparty.saker.util.io.UnsyncByteArrayOutputStream;
+import saker.build.util.java.JavaTools;
+import saker.nest.exc.IllegalArchiveEntryNameException;
+import testing.saker.nest.TestFlag;
 
 public class BundleUtils {
+	private static final Set<OpenOption> OPEN_OPTIONS_READ_WITHOUT_SHARING;
+	static {
+		Set<OpenOption> withoutsharing;
+		try {
+			Class<?> exooclass = Class.forName("com.sun.nio.file.ExtendedOpenOption");
+			@SuppressWarnings({ "unchecked", "rawtypes" })
+			OpenOption nosharewrite = (OpenOption) Enum.valueOf((Class) exooclass, "NOSHARE_WRITE");
+			@SuppressWarnings({ "unchecked", "rawtypes" })
+			OpenOption nosharedelete = (OpenOption) Enum.valueOf((Class) exooclass, "NOSHARE_DELETE");
+			withoutsharing = ImmutableUtils
+					.makeImmutableHashSet(new OpenOption[] { StandardOpenOption.READ, nosharewrite, nosharedelete });
+		} catch (ClassNotFoundException | IllegalArgumentException | ClassCastException e) {
+			//the enumerations somewhy couldn't be found
+			withoutsharing = null;
+		}
+		OPEN_OPTIONS_READ_WITHOUT_SHARING = withoutsharing;
+	}
+	private static final ClassLoader REPOSITORY_CLASSPATH_CLASSLOADER = NestRepositoryBundleClassLoader.class
+			.getClassLoader();
+
+	public static SeekableByteChannel openExclusiveChannelForJar(Path bundlejar) throws IOException {
+		if (OPEN_OPTIONS_READ_WITHOUT_SHARING != null) {
+			try {
+				return Files.newByteChannel(bundlejar, OPEN_OPTIONS_READ_WITHOUT_SHARING);
+			} catch (UnsupportedOperationException e) {
+				//not supported on mac or linux (ubuntu)
+				//  we fall back to simply opening the file as it makes no sense to fail by default
+				//XXX support exclusive read access to the file on mac and linux
+				//    if there's no OS support for exclusive access, then we could read the JAR contents into
+				//    memory and work with that to protect external malicious modifications. However, this
+				//    may require significant memory usage for large bundles.
+			}
+		}
+		return Files.newByteChannel(bundlejar, StandardOpenOption.READ);
+	}
+
 	public static BundleIdentifier requireVersioned(BundleIdentifier bundleid) {
 		Objects.requireNonNull(bundleid, "bundle id");
 		if (bundleid.getVersionQualifier() == null) {
@@ -98,7 +169,194 @@ public class BundleUtils {
 		return result.resolve(bundleid.toString() + ".jar");
 	}
 
+	public static NavigableSet<String> getJarEntryNames(JarFile jar) {
+		NavigableSet<String> result = new TreeSet<>();
+		Enumeration<JarEntry> entries = jar.entries();
+		while (entries.hasMoreElements()) {
+			JarEntry jarentry = entries.nextElement();
+			if (!jarentry.isDirectory()) {
+				result.add(jarentry.getName());
+			}
+		}
+		return ImmutableUtils.makeImmutableNavigableSet(result);
+	}
+
+	public static ByteArrayRegion getJarEntryBytes(JarFile jarfile, String name)
+			throws NoSuchFileException, IOException {
+		Objects.requireNonNull(jarfile, "archive file");
+		Objects.requireNonNull(name, "name");
+		ZipEntry je = jarfile.getEntry(name);
+		if (je == null) {
+			throw new NoSuchFileException(name, null, "Archive entry not found in: " + jarfile.getName());
+		}
+		long entrysize = je.getSize();
+		try (UnsyncByteArrayOutputStream baos = new UnsyncByteArrayOutputStream(entrysize < 0 ? 4096 : (int) entrysize);
+				InputStream is = jarfile.getInputStream(je)) {
+			baos.readFrom(is);
+			return baos.toByteArrayRegion();
+		}
+	}
+
+	public static InputStream openJarEntry(JarFile jarfile, String name) throws NoSuchFileException, IOException {
+		Objects.requireNonNull(jarfile, "archive file");
+		Objects.requireNonNull(name, "name");
+		ZipEntry je = jarfile.getEntry(name);
+		if (je == null) {
+			throw new NoSuchFileException(name, null, "Archive entry not found in: " + jarfile.getName());
+		}
+		return jarfile.getInputStream(je);
+	}
+
+	public static ClassLoader createAppropriateParentClassLoader(NestRepositoryBundle bundle) {
+		return createAppropriateParentClassLoader(bundle.getInformation());
+	}
+
+	public static ClassLoader createAppropriateParentClassLoader(BundleInformation info) {
+		if (!info.isJdkToolsDependent()) {
+			return REPOSITORY_CLASSPATH_CLASSLOADER;
+		}
+		try {
+			return MultiClassLoader.create(ImmutableUtils.asUnmodifiableArrayList(JavaTools.getJDKToolsClassLoader(),
+					REPOSITORY_CLASSPATH_CLASSLOADER));
+		} catch (IOException e) {
+			throw new UncheckedIOException("Failed to create JDK tools class loader.", e);
+		}
+	}
+
+	public static void checkArchiveEntryName(String ename) throws IllegalArchiveEntryNameException {
+		//disallow:
+		//  empty names
+		//  names with \ as separators
+		//  names that start with /
+		//  names that contain relative names
+		//  names that contain ; or : (path separators)
+
+		if (ename.isEmpty()) {
+			throw new IllegalArchiveEntryNameException("Illegal archive entry with empty name.");
+		}
+		if (ename.indexOf('\\') >= 0) {
+			throw new IllegalArchiveEntryNameException(
+					"Illegal archive entry: " + ename + " (the path name separator should be forward slash)");
+		}
+		if (ename.charAt(0) == '/') {
+			throw new IllegalArchiveEntryNameException(
+					"Illegal archive entry name: " + ename + " (name must be relative)");
+		} else if ("..".equals(ename) || ename.startsWith("../") || ename.endsWith("/..") || ename.contains("/../")) {
+			throw new IllegalArchiveEntryNameException(
+					"Illegal archive entry name: " + ename + " (.. is an illegal path name)");
+		} else if (".".equals(ename) || ename.endsWith("/.") || ename.startsWith("./") || ename.contains("/./")) {
+			throw new IllegalArchiveEntryNameException(
+					"Illegal archive entry name: " + ename + " (. is an illegal path name)");
+		} else if (ename.indexOf(':') >= 0 || ename.indexOf(';') >= 0) {
+			throw new IllegalArchiveEntryNameException(
+					"Illegal archive entry name: " + ename + " (path separators ; and : are not allowed)");
+		}
+	}
+
+	public static NavigableMap<URI, Hashes> getExternalDependencyInformationHashes(
+			ExternalDependencyInformation depinfo) throws IllegalArgumentException {
+		if (depinfo.isEmpty()) {
+			return Collections.emptyNavigableMap();
+		}
+		NavigableMap<URI, Hashes> result = new TreeMap<>();
+		collectExternalDependencyInformationHashes(depinfo, result);
+		return result;
+	}
+
+	private static void collectExternalDependencyInformationHashes(ExternalDependencyInformation depinfo,
+			NavigableMap<URI, Hashes> result) throws IllegalArgumentException {
+		for (Entry<URI, ? extends ExternalDependencyList> entry : depinfo.getDependencies().entrySet()) {
+			ExternalDependencyList deplist = entry.getValue();
+			result.compute(entry.getKey(), (uri, v) -> {
+				return merge(v, new Hashes(deplist.getSha256Hash(), deplist.getSha1Hash(), deplist.getMd5Hash()), uri);
+			});
+			for (Entry<URI, ExternalAttachmentInformation> attachmententry : deplist.getSourceAttachments()
+					.entrySet()) {
+				ExternalAttachmentInformation attachmentinfo = attachmententry.getValue();
+				result.compute(attachmententry.getKey(), (uri, v) -> {
+					return merge(v, new Hashes(attachmentinfo.getSha256Hash(), attachmentinfo.getSha1Hash(),
+							attachmentinfo.getMd5Hash()), uri);
+				});
+			}
+			for (Entry<URI, ExternalAttachmentInformation> attachmententry : deplist.getDocumentationAttachments()
+					.entrySet()) {
+				ExternalAttachmentInformation attachmentinfo = attachmententry.getValue();
+				result.compute(attachmententry.getKey(), (uri, v) -> {
+					return merge(v, new Hashes(attachmentinfo.getSha256Hash(), attachmentinfo.getSha1Hash(),
+							attachmentinfo.getMd5Hash()), uri);
+				});
+			}
+		}
+	}
+
+	private static Hashes merge(Hashes first, Hashes second, Object context) throws IllegalArgumentException {
+		if (first == null) {
+			return second;
+		}
+		if (second == null) {
+			return first;
+		}
+		return new Hashes(mergeHash(first.sha256, second.sha256, "SHA-256", context),
+				mergeHash(first.sha1, second.sha1, "SHA-1", context), mergeHash(first.md5, second.md5, "MD5", context));
+	}
+
+	private static String mergeHash(String first, String second, String name, Object context)
+			throws IllegalArgumentException {
+		if (first == null) {
+			return second;
+		}
+		if (second == null) {
+			return first;
+		}
+		if (first.equals(second)) {
+			return first;
+		}
+		throw new IllegalArgumentException(
+				"Conflicing " + name + " hash declarations for: " + context + " with " + first + " and " + second);
+	}
+
+	public static String sha256(URI uri) {
+		try {
+			//XXX reuse digest
+			MessageDigest digest = MessageDigest.getInstance("SHA-256");
+			digest.update(uri.toString().getBytes(StandardCharsets.UTF_8));
+			return StringUtils.toHexString(digest.digest());
+		} catch (NoSuchAlgorithmException e) {
+			throw new AssertionError(e);
+		}
+	}
+
 	private BundleUtils() {
 		throw new UnsupportedOperationException();
 	}
+
+	public static boolean isWildcardsInclude(String name, Iterable<? extends WildcardPath> wildcards) {
+		for (WildcardPath wc : wildcards) {
+			if (wc.includes(name)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	public static InputStream openExternalDependencyURI(URI uri)
+			throws MalformedURLException, IOException, ProtocolException {
+		URL url;
+		if (TestFlag.ENABLED) {
+			url = TestFlag.metric().toURL(uri);
+		} else {
+			url = uri.toURL();
+		}
+		URLConnection conn = url.openConnection();
+		if (conn instanceof HttpURLConnection) {
+			HttpURLConnection httpconn = (HttpURLConnection) conn;
+			httpconn.setRequestMethod("GET");
+			httpconn.setDoOutput(false);
+			httpconn.setDoInput(true);
+			httpconn.setConnectTimeout(10000);
+			httpconn.setReadTimeout(10000);
+		}
+		return conn.getInputStream();
+	}
+
 }

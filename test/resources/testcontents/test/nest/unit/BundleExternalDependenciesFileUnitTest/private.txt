@@ -1,0 +1,5 @@
+https://example.com/myjar.jar
+	classpath
+		private: true  
+	public-kind
+		private: false  

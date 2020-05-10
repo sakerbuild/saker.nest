@@ -167,8 +167,11 @@ public class MainCommand {
 	public SystemExitConfiguration callSystemExit = SystemExitConfiguration.NEVER;
 
 	public void call(ExecuteActionCommand execute) throws Exception {
+		Thread currentthread = Thread.currentThread();
 		Integer exitCode = null;
 		BundleIdentifier bundleid = getBundleIdentifier();
+		ClassLoader contextcl = currentthread.getContextClassLoader();
+		currentthread.setContextClassLoader(null);
 		try (ConfiguredRepositoryStorage configuredstorage = new ConfiguredRepositoryStorage(execute.repository,
 				repositoryId, ExecutionPathConfiguration.local(SakerPath.valueOf(System.getProperty("user.dir"))),
 				userParameters)) {
@@ -216,6 +219,8 @@ public class MainCommand {
 				System.exit(exitCode == null ? 0 : exitCode);
 				return;
 			}
+			//restore context classloader
+			currentthread.setContextClassLoader(contextcl);
 		}
 	}
 

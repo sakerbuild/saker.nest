@@ -24,18 +24,18 @@ package saker.nest.exc;
  * The exception may also be thrown if bundle related data failed to load. That is, not the bundle loading itself
  * failed, but the bundle related data caused the failure.
  */
-public class BundleLoadingFailedException extends Exception {
+public class BundleLoadingFailedException extends NestResourceLoadingFailedException {
 	private static final long serialVersionUID = 1L;
 
 	/**
-	 * @see Exception#Exception()
+	 * @see NestResourceLoadingFailedException#NestResourceLoadingException()
 	 */
 	public BundleLoadingFailedException() {
 		super();
 	}
 
 	/**
-	 * @see Exception#Exception(String, Throwable, boolean, boolean)
+	 * @see NestResourceLoadingFailedException#NestResourceLoadingException(String, Throwable, boolean, boolean)
 	 */
 	protected BundleLoadingFailedException(String message, Throwable cause, boolean enableSuppression,
 			boolean writableStackTrace) {
@@ -43,21 +43,21 @@ public class BundleLoadingFailedException extends Exception {
 	}
 
 	/**
-	 * @see Exception#Exception(String, Throwable)
+	 * @see NestResourceLoadingFailedException#NestResourceLoadingException(String, Throwable)
 	 */
 	public BundleLoadingFailedException(String message, Throwable cause) {
 		super(message, cause);
 	}
 
 	/**
-	 * @see Exception#Exception(String)
+	 * @see NestResourceLoadingFailedException#NestResourceLoadingException(String)
 	 */
 	public BundleLoadingFailedException(String message) {
 		super(message);
 	}
 
 	/**
-	 * @see Exception#Exception( Throwable)
+	 * @see NestResourceLoadingFailedException#NestResourceLoadingException( Throwable)
 	 */
 	public BundleLoadingFailedException(Throwable cause) {
 		super(cause);

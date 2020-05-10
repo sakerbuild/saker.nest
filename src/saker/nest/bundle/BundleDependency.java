@@ -101,7 +101,7 @@ public final class BundleDependency implements Externalizable {
 	}
 
 	/**
-	 * Gets the meta-data entroes of this bundle dependency.
+	 * Gets the meta-data entries of this bundle dependency.
 	 * 
 	 * @return An unmodifiable set of meta-data entries.
 	 */
@@ -216,6 +216,8 @@ public final class BundleDependency implements Externalizable {
 
 	/**
 	 * Checks if the argument is a valid dependency kind.
+	 * <p>
+	 * The argument must match the <code>[a-zA-Z_\\-0-9]+</code> regular expression.
 	 * 
 	 * @param kind
 	 *            The kind to check its format.
@@ -227,6 +229,8 @@ public final class BundleDependency implements Externalizable {
 
 	/**
 	 * Checks if the argument is a valid meta-data name.
+	 * <p>
+	 * The argument must match the <code>[a-zA-Z_\\-0-9]+</code> regular expression.
 	 * 
 	 * @param name
 	 *            The name to check its format.
@@ -343,6 +347,8 @@ public final class BundleDependency implements Externalizable {
 
 		/**
 		 * Creates the bundle dependency based on the assigned data.
+		 * <p>
+		 * The builder can be reused after this call.
 		 * 
 		 * @return The created dependency.
 		 * @throws IllegalStateException

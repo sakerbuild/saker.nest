@@ -1,0 +1,4 @@
+https://example.com/external_first.jar
+	classpath
+https://example.com/external_second.jar
+	classpath

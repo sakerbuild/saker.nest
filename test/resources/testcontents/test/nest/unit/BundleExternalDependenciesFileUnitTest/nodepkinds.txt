@@ -1,0 +1,3 @@
+https://example.com/myjar.jar
+
+https://example.com/myjar2.jar

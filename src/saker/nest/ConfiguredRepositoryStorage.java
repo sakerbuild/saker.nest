@@ -21,6 +21,7 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.net.URI;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -47,6 +48,7 @@ import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
+import saker.build.file.path.WildcardPath;
 import saker.build.runtime.params.ExecutionPathConfiguration;
 import saker.build.runtime.repository.TaskNotFoundException;
 import saker.build.task.TaskFactory;
@@ -58,6 +60,7 @@ import saker.build.thirdparty.saker.util.StringUtils;
 import saker.build.thirdparty.saker.util.function.Functionals;
 import saker.build.thirdparty.saker.util.io.FileUtils;
 import saker.build.util.java.JavaTools;
+import saker.nest.bundle.AbstractExternalArchive;
 import saker.nest.bundle.AbstractNestRepositoryBundle;
 import saker.nest.bundle.BundleDependency;
 import saker.nest.bundle.BundleDependencyInformation;
@@ -65,13 +68,21 @@ import saker.nest.bundle.BundleDependencyList;
 import saker.nest.bundle.BundleIdentifier;
 import saker.nest.bundle.BundleInformation;
 import saker.nest.bundle.BundleKey;
+import saker.nest.bundle.BundleUtils;
 import saker.nest.bundle.DependencyConstraintConfiguration;
+import saker.nest.bundle.ExternalArchive;
+import saker.nest.bundle.ExternalArchiveKey;
+import saker.nest.bundle.ExternalDependency;
+import saker.nest.bundle.ExternalDependencyInformation;
+import saker.nest.bundle.ExternalDependencyList;
 import saker.nest.bundle.NestBundleStorageConfiguration;
 import saker.nest.bundle.NestRepositoryBundle;
 import saker.nest.bundle.NestRepositoryBundleClassLoader;
 import saker.nest.bundle.NestRepositoryBundleClassLoader.DependentClassLoader;
+import saker.nest.bundle.NestRepositoryExternalArchiveClassLoader;
 import saker.nest.bundle.SimpleBundleKey;
 import saker.nest.bundle.SimpleDependencyConstraintConfiguration;
+import saker.nest.bundle.SimpleExternalArchiveKey;
 import saker.nest.bundle.lookup.AbstractBundleLookup;
 import saker.nest.bundle.lookup.BundleLookup;
 import saker.nest.bundle.lookup.BundleVersionLookupResult;
@@ -96,6 +107,7 @@ import saker.nest.dependency.DependencyResolutionLogger;
 import saker.nest.dependency.DependencyUtils;
 import saker.nest.exc.BundleDependencyUnsatisfiedException;
 import saker.nest.exc.BundleLoadingFailedException;
+import saker.nest.exc.ExternalArchiveLoadingFailedException;
 import saker.nest.meta.Versions;
 import saker.nest.thirdparty.org.json.JSONArray;
 import saker.nest.thirdparty.org.json.JSONObject;
@@ -103,6 +115,7 @@ import saker.nest.utils.IdentityComparisonPair;
 import saker.nest.utils.NonSpaceIterator;
 
 public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorageConfiguration {
+
 	@SuppressWarnings("unchecked")
 	private static final List<?> DEFAULT_STORAGE_CONFIG = ImmutableUtils.asUnmodifiableArrayList(
 			ImmutableUtils.makeImmutableMapEntry(STORAGE_TYPE_PARAMETER, STORAGE_TYPE_PARAMETER),
@@ -144,7 +157,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 
 	private transient final ConcurrentSkipListMap<TaskName, Supplier<? extends TaskFactory<?>>> taskClasses = new ConcurrentSkipListMap<>();
 
-	private DependencyConstraintConfiguration constraintConfiguration;
+	private final DependencyConstraintConfiguration constraintConfiguration;
 
 	private final Object detectChangeLock = new Object();
 	private DetectedChanges expectedDetectedChanges;
@@ -1159,7 +1172,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 		}
 
 		Map<ClassLoaderDomain, NestRepositoryBundleClassLoader> constructeddomaincls = new HashMap<>();
-		Map<ClassLoaderDomain, Map<BundleKey, DependentClassLoader>> constructedcldependencies = new HashMap<>();
+		Map<ClassLoaderDomain, Map<BundleKey, DependentClassLoader<NestRepositoryBundleClassLoader>>> constructedcldependencies = new HashMap<>();
 		for (ClassLoaderDomain domain : rootbundledomain.getAllDomains()) {
 			NestRepositoryBundleClassLoader presentdomaincl = domainClassLoaders.get(domain);
 			if (presentdomaincl != null) {
@@ -1179,20 +1192,63 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 						"Failed to retrieve previously resolved bundle. (" + domain.bundle.getBundleIdentifier() + ")",
 						e);
 			}
-			Map<BundleKey, DependentClassLoader> dependencyclassloaders = new LinkedHashMap<>();
+			Map<BundleKey, DependentClassLoader<NestRepositoryBundleClassLoader>> dependencyclassloaders = new LinkedHashMap<>();
 
 			BundleLookup relativebundlelookup = this.lookupConfiguration.findStorageViewBundleLookup(storageviewkey);
 
-			NestRepositoryBundleClassLoader constructedcl = new NestRepositoryBundleClassLoader(this, domain.bundle,
-					domainbundle, dependencyclassloaders, relativebundlelookup);
+			BundleInformation bundleinfo = domainbundle.getInformation();
+			ClassLoader parentcl = BundleUtils.createAppropriateParentClassLoader(bundleinfo);
+
+			Map<SimpleExternalArchiveKey, DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>> externaldependencyclassloaders = new LinkedHashMap<>();
+			ExternalDependencyInformation extdependencies = bundleinfo.getExternalDependencyInformation();
+			NestRepositoryBundleClassLoader constructedcl = new NestRepositoryBundleClassLoader(parentcl, this,
+					domain.bundle, domainbundle, dependencyclassloaders, relativebundlelookup,
+					externaldependencyclassloaders);
+
+			if (!extdependencies.isEmpty()) {
+				ExternalDependencyInformation filteredextdep = filterExternalDependencyForClasspath(extdependencies);
+				Map<SimpleExternalArchiveKey, ? extends AbstractExternalArchive> loadedarchives;
+				try {
+					loadedarchives = repository.loadExternalArchives(filteredextdep, domainbundlestorage);
+				} catch (NullPointerException | IllegalArgumentException | ExternalArchiveLoadingFailedException e) {
+					throw new BundleDependencyUnsatisfiedException(
+							"Failed to load external dependencies for: " + bundleinfo.getBundleIdentifier(), e);
+				}
+				if (!loadedarchives.isEmpty()) {
+					Map<URI, ? extends ExternalDependencyList> cpextdependencies = filteredextdep.getDependencies();
+					Set<NestRepositoryExternalArchiveClassLoader> extclassloaderdomain = new LinkedHashSet<>();
+					for (Entry<? extends SimpleExternalArchiveKey, ? extends AbstractExternalArchive> entry : loadedarchives
+							.entrySet()) {
+
+						SimpleExternalArchiveKey archivekey = entry.getKey();
+						URI archiveuri = archivekey.getUri();
+						ExternalDependencyList deplist = cpextdependencies.get(archiveuri);
+
+						boolean privatedep;
+						String entryname = archivekey.getEntryName();
+						if (entryname == null) {
+							privatedep = isMainAllPrivateDependencies(deplist.getDependencies());
+						} else {
+							privatedep = isEntryAllPrivateDependencies(entryname, deplist.getDependencies());
+						}
+
+						NestRepositoryExternalArchiveClassLoader extcl = new NestRepositoryExternalArchiveClassLoader(
+								constructedcl, parentcl, entry.getValue(), extclassloaderdomain);
+						extclassloaderdomain.add(extcl);
+						externaldependencyclassloaders.put(entry.getKey(),
+								new DependentClassLoader<>(extcl, privatedep));
+					}
+				}
+
+			}
 
 			constructedcldependencies.put(domain, dependencyclassloaders);
 			constructeddomaincls.put(domain, constructedcl);
 		}
 
-		for (Entry<ClassLoaderDomain, Map<BundleKey, DependentClassLoader>> entry : constructedcldependencies
+		for (Entry<ClassLoaderDomain, Map<BundleKey, DependentClassLoader<NestRepositoryBundleClassLoader>>> entry : constructedcldependencies
 				.entrySet()) {
-			Map<BundleKey, DependentClassLoader> cldepmap = entry.getValue();
+			Map<BundleKey, DependentClassLoader<NestRepositoryBundleClassLoader>> cldepmap = entry.getValue();
 			for (Entry<? extends BundleKey, ClassLoaderDomain.DomainDependency> depentry : entry.getKey().dependencies
 					.entrySet()) {
 				if (cldepmap.containsKey(depentry.getKey())) {
@@ -1202,7 +1258,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 				if (domaincl == null) {
 					domaincl = constructeddomaincls.get(depentry.getValue().domain);
 				}
-				cldepmap.put(depentry.getKey(), new DependentClassLoader(domaincl, depentry.getValue().privateScope));
+				cldepmap.put(depentry.getKey(), new DependentClassLoader<>(domaincl, depentry.getValue().privateScope));
 			}
 		}
 
@@ -1213,6 +1269,75 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 
 		domainClassLoaders.putAll(constructeddomaincls);
 		return result;
+	}
+
+	@Override
+	public Map<? extends ExternalArchiveKey, ? extends ExternalArchive> loadExternalArchives(
+			ExternalDependencyInformation depinfo)
+			throws NullPointerException, IllegalArgumentException, ExternalArchiveLoadingFailedException {
+		return repository.loadExternalArchives(depinfo, (uri, hashes) -> BundleUtils.openExternalDependencyURI(uri));
+	}
+
+	private ExternalDependencyInformation filterExternalDependencyForClasspath(
+			ExternalDependencyInformation extdependencies) {
+		Map<URI, ExternalDependencyList> cpextdependencies = new LinkedHashMap<>();
+
+		for (Entry<URI, ? extends ExternalDependencyList> entry : extdependencies.getDependencies().entrySet()) {
+			ExternalDependencyList deplist = entry.getValue();
+			ExternalDependencyList.Builder deplistbuilder = ExternalDependencyList.builder();
+			deplistbuilder.setSha256Hash(deplist.getSha256Hash());
+			deplistbuilder.setSha1Hash(deplist.getSha1Hash());
+			deplistbuilder.setMd5Hash(deplist.getMd5Hash());
+
+			boolean hadres = false;
+			for (ExternalDependency extdep : deplist.getDependencies()) {
+				if (DependencyUtils.isDependencyConstraintExcludes(constraintConfiguration, extdep)) {
+					continue;
+				}
+				Set<String> kinds = extdep.getKinds();
+				if (!kinds.contains(BundleInformation.DEPENDENCY_KIND_CLASSPATH)) {
+					continue;
+				}
+				deplistbuilder.addDepdendency(extdep);
+				hadres = true;
+			}
+			if (!hadres) {
+				continue;
+			}
+			//no need for attachments to load classloader
+			cpextdependencies.put(entry.getKey(), deplistbuilder.build());
+		}
+
+		ExternalDependencyInformation filteredextdep = ExternalDependencyInformation.create(cpextdependencies);
+		return filteredextdep;
+	}
+
+	private static boolean isEntryAllPrivateDependencies(String ename, Iterable<? extends ExternalDependency> deps) {
+		for (ExternalDependency dep : deps) {
+			Set<WildcardPath> entries = dep.getEntries();
+			if (ObjectUtils.isNullOrEmpty(entries)) {
+				continue;
+			}
+			if (!BundleUtils.isWildcardsInclude(ename, entries)) {
+				continue;
+			}
+			if (!dep.isPrivate()) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static boolean isMainAllPrivateDependencies(Iterable<? extends ExternalDependency> deps) {
+		for (ExternalDependency dep : deps) {
+			if (!dep.isIncludesMainArchive()) {
+				continue;
+			}
+			if (!dep.isPrivate()) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	private static Set<BundleKey> toBundleKeySet(BundleVersionLookupResult lookedupversions) {
@@ -1377,8 +1502,9 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			ClassLoaderDomain result = new ClassLoaderDomain(cl.getBundleKey(), deps);
 			cldomains.put(cl, result);
 
-			for (Entry<BundleKey, DependentClassLoader> entry : cl.getDependencyClassLoaders().entrySet()) {
-				DependentClassLoader depclref = entry.getValue();
+			for (Entry<BundleKey, DependentClassLoader<? extends NestRepositoryBundleClassLoader>> entry : cl
+					.getDependencyClassLoaders().entrySet()) {
+				DependentClassLoader<? extends NestRepositoryBundleClassLoader> depclref = entry.getValue();
 				ClassLoaderDomain depdomain = fromClassLoaderImpl(depclref.classLoader, cldomains);
 				deps.put(entry.getKey(), new DomainDependency(depdomain, depclref.privateScope));
 			}

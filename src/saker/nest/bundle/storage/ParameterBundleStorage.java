@@ -75,10 +75,14 @@ import saker.nest.NestRepositoryImpl;
 import saker.nest.bundle.AbstractNestRepositoryBundle;
 import saker.nest.bundle.BundleIdentifier;
 import saker.nest.bundle.BundleUtils;
+import saker.nest.bundle.ExternalArchive;
+import saker.nest.bundle.ExternalArchiveKey;
+import saker.nest.bundle.ExternalDependencyInformation;
 import saker.nest.bundle.JarNestRepositoryBundleImpl;
 import saker.nest.bundle.NestRepositoryBundle;
 import saker.nest.exc.BundleLoadingFailedException;
 import saker.nest.exc.BundleStorageInitializationException;
+import saker.nest.exc.ExternalArchiveLoadingFailedException;
 import saker.nest.exc.InvalidNestBundleException;
 import testing.saker.nest.TestFlag;
 
@@ -110,7 +114,7 @@ public class ParameterBundleStorage extends AbstractBundleStorage {
 
 		@Override
 		public AbstractBundleStorage getStorage(NestRepositoryImpl repository) {
-			return new ParameterBundleStorage(this);
+			return new ParameterBundleStorage(this, repository);
 		}
 
 		@Override
@@ -160,9 +164,11 @@ public class ParameterBundleStorage extends AbstractBundleStorage {
 
 	private final ConcurrentHashMap<Path, Object> bundleLoadLocks = new ConcurrentHashMap<>();
 	private final ConcurrentHashMap<Path, JarNestRepositoryBundleImpl> loadedBundles = new ConcurrentHashMap<>();
+	private final NestRepositoryImpl repository;
 
-	public ParameterBundleStorage(ParameterStorageKey storageKey) {
+	public ParameterBundleStorage(ParameterStorageKey storageKey, NestRepositoryImpl repository) {
 		this.storageKey = storageKey;
+		this.repository = repository;
 		this.storageDirectory = LocalFileProvider.toRealPath(storageKey.storageDirectory);
 		this.bundlesDir = storageDirectory.resolve("bundles");
 	}
@@ -371,6 +377,13 @@ public class ParameterBundleStorage extends AbstractBundleStorage {
 				}
 			} while (it.hasNext());
 			return bundlepathattrs;
+		}
+
+		@Override
+		public Map<? extends ExternalArchiveKey, ? extends ExternalArchive> loadExternalArchives(
+				ExternalDependencyInformation depinfo)
+				throws NullPointerException, IllegalArgumentException, ExternalArchiveLoadingFailedException {
+			return repository.loadExternalArchives(depinfo, this);
 		}
 
 		@Override

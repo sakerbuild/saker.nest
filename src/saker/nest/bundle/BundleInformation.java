@@ -53,9 +53,9 @@ import saker.build.thirdparty.saker.util.io.ByteArrayRegion;
 import saker.build.thirdparty.saker.util.io.SerialUtils;
 import saker.build.thirdparty.saker.util.io.StreamUtils;
 import saker.build.thirdparty.saker.util.io.UnsyncByteArrayInputStream;
-import saker.nest.NestRepositoryFactory;
 import saker.nest.bundle.lookup.BundleLookup;
 import saker.nest.bundle.storage.BundleStorageView;
+import saker.nest.exc.IllegalArchiveEntryNameException;
 import saker.nest.exc.InvalidNestBundleException;
 import saker.nest.meta.Versions;
 import saker.nest.version.VersionRange;
@@ -150,6 +150,22 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	 * various environments. See the <code>DEPENDENCY_META_*</code> constants declared in this class.
 	 */
 	public static final String ENTRY_BUNDLE_DEPENDENCIES = "META-INF/nest/dependencies";
+
+	/**
+	 * Bundle entry name for external dependencies.
+	 * <p>
+	 * The file contains {@link ExternalDependencyInformation} data in the format specified by
+	 * {@link ExternalDependencyInformation#readFrom(InputStream)}.
+	 * <p>
+	 * Dependencies declared with the <code>{@value #DEPENDENCY_KIND_CLASSPATH}</code> kind will be added tot he runtime
+	 * classpath of the bundle.
+	 * <p>
+	 * The classpath dependencies can have various meta-datas that can be used to configure the classpath loading for
+	 * various environments. See the <code>DEPENDENCY_META_*</code> constants declared in this class.
+	 * 
+	 * @since saker.nest 0.8.5
+	 */
+	public static final String ENTRY_BUNDLE_EXTERNAL_DEPENDENCIES = "META-INF/nest/external_dependencies";
 
 	/**
 	 * Manifest attribute name for the bundle information version number.
@@ -279,9 +295,9 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	public static final String SPECIAL_CLASSPATH_DEPENDENCY_JDK_TOOLS = "jdktools";
 
 	/**
-	 * Dependency kind for specifying that a bundle is required to be on the classpath.
+	 * Dependency kind for specifying that the dependency is required to be on the classpath.
 	 * <p>
-	 * The denoted bundle is used to lookup classes which are required by classes contained in this bundle.
+	 * The denoted archive is used to lookup classes which are required by classes contained in this bundle.
 	 */
 	public static final String DEPENDENCY_KIND_CLASSPATH = "classpath";
 	/**
@@ -403,6 +419,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 
 	private BundleIdentifier bundleId;
 	private BundleDependencyInformation dependencyInformation;
+	private ExternalDependencyInformation externalDependencyInformation;
 	private NavigableMap<TaskName, String> taskClassNames;
 	private NavigableSet<String> specialClasspathDependencies;
 	private BundleIdentifier docAttachmentBundle;
@@ -439,12 +456,13 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 			if (!entrynames.add(ename)) {
 				throw new InvalidNestBundleException("Duplicate bundle entry: " + ename);
 			}
-			checkEntryName(ename);
+			checkBundleEntryName(ename);
 		}
 
 		this.bundleId = readBundleIdentifier(bundlemanifest);
 
 		this.dependencyInformation = readDependencies(zf, this.bundleId);
+		this.externalDependencyInformation = readExternalDependencies(zf);
 		this.taskClassNames = readTaskNames(zf);
 		this.mainClass = bundlemanifest.getMainAttributes().getValue(Attributes.Name.MAIN_CLASS);
 		verifyContainsRequiredClassFiles(entrynames, taskClassNames, this.mainClass);
@@ -463,18 +481,26 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	private BundleInformation(Manifest bundlemanifest, ZipInputStream jis)
 			throws NullPointerException, IOException, InvalidNestBundleException {
 		ByteArrayRegion dependenciesbytes = null;
+		ByteArrayRegion extdependenciesbytes = null;
 		BundleDependencyInformation dependencies = null;
+		ExternalDependencyInformation extdependencies = null;
 		NavigableMap<TaskName, String> taskClassNames = null;
 		Set<String> entrynames = new TreeSet<>(String::compareToIgnoreCase);
 		for (ZipEntry e; (e = jis.getNextEntry()) != null;) {
 			String ename = e.getName();
-			checkEntryName(ename);
+			checkBundleEntryName(ename);
 			if (!entrynames.add(ename)) {
 				throw new InvalidNestBundleException("Duplicate bundle entry: " + ename);
 			}
 			if (ENTRY_BUNDLE_TASKS.equalsIgnoreCase(ename)) {
+				if (taskClassNames != null) {
+					throw new InvalidNestBundleException("Duplicate bundle entry: " + ename);
+				}
 				taskClassNames = readTaskNames(jis);
 			} else if (ENTRY_BUNDLE_DEPENDENCIES.equalsIgnoreCase(ename)) {
+				if (dependenciesbytes != null) {
+					throw new InvalidNestBundleException("Duplicate bundle entry: " + ename);
+				}
 				dependenciesbytes = StreamUtils.readStreamFully(jis);
 			} else if (JarFile.MANIFEST_NAME.equalsIgnoreCase(ename)) {
 				if (bundlemanifest != null) {
@@ -482,6 +508,11 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 				}
 				bundlemanifest = new Manifest();
 				bundlemanifest.read(jis);
+			} else if (ENTRY_BUNDLE_EXTERNAL_DEPENDENCIES.equalsIgnoreCase(ename)) {
+				if (extdependenciesbytes != null) {
+					throw new InvalidNestBundleException("Duplicate bundle entry: " + ename);
+				}
+				extdependenciesbytes = StreamUtils.readStreamFully(jis);
 			}
 		}
 		if (bundlemanifest == null) {
@@ -504,12 +535,23 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 						"Failed to parse bundle dependencies. (" + ENTRY_BUNDLE_DEPENDENCIES + ")", e);
 			}
 		}
+		if (extdependenciesbytes != null) {
+			try {
+				extdependencies = ExternalDependencyInformation
+						.readFrom(new UnsyncByteArrayInputStream(extdependenciesbytes));
+			} catch (IllegalArgumentException e) {
+				throw new InvalidNestBundleException(
+						"Failed to parse external dependencies. (" + ENTRY_BUNDLE_EXTERNAL_DEPENDENCIES + ")", e);
+			}
+		}
 
 		if (taskClassNames == null) {
 			taskClassNames = Collections.emptyNavigableMap();
 		}
 
 		this.dependencyInformation = dependencies == null ? BundleDependencyInformation.EMPTY : dependencies;
+		this.externalDependencyInformation = extdependencies == null ? ExternalDependencyInformation.EMPTY
+				: extdependencies;
 		this.taskClassNames = taskClassNames;
 		this.mainClass = bundlemanifest.getMainAttributes().getValue(Attributes.Name.MAIN_CLASS);
 		verifyContainsRequiredClassFiles(entrynames, taskClassNames, this.mainClass);
@@ -523,6 +565,14 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 		this.supportedClassPathArchitectures = readSupportedArchitectures(bundlemanifest);
 
 		verifyBundleDependenciesForBundleIdentifier(dependencies, this.bundleId);
+	}
+
+	private static void checkBundleEntryName(String ename) {
+		try {
+			BundleUtils.checkArchiveEntryName(ename);
+		} catch (IllegalArchiveEntryNameException e) {
+			throw new InvalidNestBundleException(e.getMessage());
+		}
 	}
 
 	private static void validateBundleManifest(Manifest manifest) {
@@ -697,6 +747,19 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	}
 
 	/**
+	 * Gets the external dependencies of this bundle.
+	 * <p>
+	 * If the bundle declares no external dependencies, an empty informaiton object is returned.
+	 * 
+	 * @return The external dependency information. Never <code>null</code>.
+	 * @see #ENTRY_BUNDLE_EXTERNAL_DEPENDENCIES
+	 * @since saker.nest 0.8.5
+	 */
+	public ExternalDependencyInformation getExternalDependencyInformation() {
+		return externalDependencyInformation;
+	}
+
+	/**
 	 * Checks if this bundle requires the JDK tools to be present on the classpath.
 	 * 
 	 * @return <code>true</code> if the bundle requires the JDK tools classes.
@@ -741,6 +804,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	public void writeExternal(ObjectOutput out) throws IOException {
 		out.writeObject(bundleId);
 		out.writeObject(dependencyInformation);
+		out.writeObject(externalDependencyInformation);
 		SerialUtils.writeExternalMap(out, taskClassNames);
 		SerialUtils.writeExternalCollection(out, specialClasspathDependencies);
 		out.writeObject(docAttachmentBundle);
@@ -756,6 +820,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	public void readExternal(ObjectInput in) throws IOException, ClassNotFoundException {
 		bundleId = (BundleIdentifier) in.readObject();
 		dependencyInformation = (BundleDependencyInformation) in.readObject();
+		externalDependencyInformation = SerialUtils.readExternalObject(in);
 		taskClassNames = SerialUtils.readExternalSortedImmutableNavigableMap(in);
 		specialClasspathDependencies = SerialUtils.readExternalSortedImmutableNavigableSet(in);
 		docAttachmentBundle = (BundleIdentifier) in.readObject();
@@ -795,6 +860,11 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 			if (other.docAttachmentBundle != null)
 				return false;
 		} else if (!docAttachmentBundle.equals(other.docAttachmentBundle))
+			return false;
+		if (externalDependencyInformation == null) {
+			if (other.externalDependencyInformation != null)
+				return false;
+		} else if (!externalDependencyInformation.equals(other.externalDependencyInformation))
 			return false;
 		if (mainClass == null) {
 			if (other.mainClass != null)
@@ -845,28 +915,6 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 				+ ", taskClassNames=" + taskClassNames + ", specialClasspathDependencies="
 				+ specialClasspathDependencies + ", docAttachmentBundle=" + docAttachmentBundle
 				+ ", sourceAttachmentBundle=" + sourceAttachmentBundle + ", mainClass=" + mainClass + "]";
-	}
-
-	private static void checkEntryName(String ename) {
-		//disallow:
-		//  empty names
-		//  names with \ as separators
-		//  names that start with /
-		//  names that contain relative names
-		//  names that contain ; or : (path separators)
-
-		if (ename.isEmpty()) {
-			throw new InvalidNestBundleException("Illegal bundle entry with empty name.");
-		}
-		if (ename.indexOf('\\') >= 0) {
-			throw new InvalidNestBundleException("Illegal " + NestRepositoryFactory.IDENTIFIER + " bundle entry: "
-					+ ename + " (the path name separator should be forward slash)");
-		}
-		if (ename.charAt(0) == '/' || "..".equals(ename) || ".".equals(ename) || ename.startsWith("./")
-				|| ename.startsWith("../") || ename.endsWith("/..") || ename.endsWith("/.") || ename.contains("/../")
-				|| ename.contains("/./") || ename.indexOf(':') >= 0 || ename.indexOf(';') >= 0) {
-			throw new InvalidNestBundleException("Illegal bundle entry name: " + ename);
-		}
 	}
 
 	private static NavigableSet<String> getSpecialClassPathDependencies(Manifest bundlemanifest) {
@@ -944,17 +992,33 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 
 	private static BundleDependencyInformation readDependencies(ZipFile jf, BundleIdentifier declaringbundleid)
 			throws IOException {
-		ZipEntry propentry = jf.getEntry(ENTRY_BUNDLE_DEPENDENCIES);
-		if (propentry == null) {
+		ZipEntry zipentry = jf.getEntry(ENTRY_BUNDLE_DEPENDENCIES);
+		if (zipentry == null) {
 			return BundleDependencyInformation.EMPTY;
 		}
 
-		try (InputStream eis = jf.getInputStream(propentry)) {
+		try (InputStream eis = jf.getInputStream(zipentry)) {
 			try {
 				return BundleDependencyInformation.readFrom(eis, declaringbundleid);
 			} catch (IllegalArgumentException e) {
 				throw new InvalidNestBundleException(
 						"Failed to parse bundle dependencies. (" + ENTRY_BUNDLE_DEPENDENCIES + ")", e);
+			}
+		}
+	}
+
+	private static ExternalDependencyInformation readExternalDependencies(ZipFile jf) throws IOException {
+		ZipEntry zipentry = jf.getEntry(ENTRY_BUNDLE_EXTERNAL_DEPENDENCIES);
+		if (zipentry == null) {
+			return ExternalDependencyInformation.EMPTY;
+		}
+
+		try (InputStream eis = jf.getInputStream(zipentry)) {
+			try {
+				return ExternalDependencyInformation.readFrom(eis);
+			} catch (IllegalArgumentException e) {
+				throw new InvalidNestBundleException(
+						"Failed to parse external dependencies. (" + ENTRY_BUNDLE_EXTERNAL_DEPENDENCIES + ")", e);
 			}
 		}
 	}

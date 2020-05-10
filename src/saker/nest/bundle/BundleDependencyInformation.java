@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.regex.Pattern;
@@ -85,10 +86,11 @@ public final class BundleDependencyInformation implements Externalizable {
 	 *            The dependencies.
 	 * @return The new dependency information object.
 	 * @throws NullPointerException
-	 *             If the argument is <code>null</code>.
+	 *             If the argument or any elements of it are <code>null</code>.
 	 * @throws IllegalArgumentException
 	 *             If any of the bundle identifier keys in the argument contains
-	 *             {@linkplain BundleIdentifier#getVersionQualifier() version qualifier}.
+	 *             {@linkplain BundleIdentifier#getVersionQualifier() version qualifier} or duplicate bundle identifiers
+	 *             are encountered.
 	 */
 	public static BundleDependencyInformation create(Map<BundleIdentifier, ? extends BundleDependencyList> dependencies)
 			throws NullPointerException, IllegalArgumentException {
@@ -99,13 +101,22 @@ public final class BundleDependencyInformation implements Externalizable {
 		LinkedHashMap<BundleIdentifier, BundleDependencyList> thisdependencies = new LinkedHashMap<>();
 		for (Entry<BundleIdentifier, ? extends BundleDependencyList> entry : dependencies.entrySet()) {
 			BundleIdentifier bundleid = entry.getKey();
+			if (bundleid == null) {
+				throw new NullPointerException("Null bundle id.");
+			}
 			if (bundleid.getVersionQualifier() != null) {
 				throw new IllegalArgumentException(
 						"Dependency bundle identifier cannot have version qualifier: " + bundleid);
 			}
 			BundleDependencyList dlist = entry.getValue();
+			if (dlist == null) {
+				throw new NullPointerException("Null dependency list for: " + bundleid);
+			}
 			if (!dlist.isEmpty()) {
-				thisdependencies.put(bundleid, dlist);
+				BundleDependencyList prev = thisdependencies.putIfAbsent(bundleid, dlist);
+				if (prev != null) {
+					throw new IllegalArgumentException("Duplicate bundle dependencies: " + bundleid);
+				}
 			}
 		}
 		return new BundleDependencyInformation(ImmutableUtils.unmodifiableMap(thisdependencies));
@@ -500,7 +511,7 @@ public final class BundleDependencyInformation implements Externalizable {
 		return getClass().getSimpleName() + "[" + dependencies + "]";
 	}
 
-	private static final Pattern COMMA_WHITESPACE_SPLIT = Pattern.compile("[, \\t]+");
+	static final Pattern COMMA_WHITESPACE_SPLIT = Pattern.compile("[, \\t]+");
 
 	private static void readBundleDependency(LinePeekIterator it, Map<BundleIdentifier, BundleDependencyList> result,
 			String declaringbundlename, String declaringbundleversion) throws IOException {
@@ -509,20 +520,21 @@ public final class BundleDependencyInformation implements Externalizable {
 		}
 		do {
 			String line = it.next();
+			int linenumber = it.getLineNumber();
 			if (!getLeadingWhitespace(line).isEmpty()) {
 				throw new IllegalArgumentException(
-						"Malformed dependencies at line: " + it.getLineNumber() + " (Expected bundle dependency)");
+						"Malformed dependencies at line: " + linenumber + " (Expected bundle dependency)");
 			}
 			BundleIdentifier bundleid;
 			try {
 				bundleid = BundleIdentifier.valueOf(line);
 			} catch (IllegalArgumentException e) {
 				throw new IllegalArgumentException(
-						"Failed to parse bundle identifier: " + line + " at line: " + it.getLineNumber(), e);
+						"Failed to parse bundle identifier: " + line + " at line: " + linenumber, e);
 			}
 			if (!bundleid.getMetaQualifiers().isEmpty()) {
 				throw new IllegalArgumentException("Cannot specify meta qualifiers for bundle dependency: " + bundleid
-						+ " at line: " + it.getLineNumber());
+						+ " at line: " + linenumber);
 			}
 
 			String dependencythisversion;
@@ -535,15 +547,155 @@ public final class BundleDependencyInformation implements Externalizable {
 					readBundleDependencyContents(it, bundleid, dependencythisversion));
 			if (prev != null) {
 				throw new IllegalArgumentException(
-						"Multiple dependency declarations for bundle: " + bundleid + " at line: " + it.getLineNumber());
+						"Multiple dependency declarations for bundle: " + bundleid + " at line: " + linenumber);
 			}
 		} while (it.hasNext());
+	}
+
+	static void parseMetaDatas(LinePeekIterator it, String ws, String mdws, BiConsumer<String, String> handler)
+			throws IOException {
+		do {
+			String mdline = it.peek();
+			if (!mdline.startsWith(mdws)) {
+				break;
+			}
+			it.move();
+			String mdleading = getLeadingWhitespace(mdline);
+			if (mdleading.equals(mdws)) {
+				//found a metadata line
+				int mddotidx = mdline.indexOf(':');
+				if (mddotidx < 0) {
+					throw new IllegalArgumentException(
+							"Malformed metadata at line: " + it.getLineNumber() + " (Expected name and content)");
+				}
+				String name = mdline.substring(0, mddotidx).trim();
+				if (name.isEmpty()) {
+					throw new IllegalArgumentException("Empty metadata name at line: " + it.getLineNumber());
+				}
+				if (!BundleDependency.isValidMetaDataName(name)) {
+					throw new IllegalArgumentException(
+							"Invalid metadata name: " + name + " at line: " + it.getLineNumber());
+				}
+				if (StringUtils.startsWithIgnoreCase(name, "nest-")) {
+					throw new IllegalArgumentException(
+							"Reserved metadata name: " + name + " at line: " + it.getLineNumber());
+				}
+				String content = mdline.substring(mddotidx + 1);
+				if (!content.isEmpty()) {
+					if (isStartsWithQuote(content)) {
+						int quotidx = content.indexOf('"');
+						//multi line metadata
+						StringBuilder sb = new StringBuilder();
+						String l = content.substring(quotidx + 1, content.length());
+						while (true) {
+							int lastquotidx = l.lastIndexOf('"');
+							if (lastquotidx >= 0 && isWhiteSpaceOnlyFrom(l, lastquotidx + 1)) {
+								//this line closes the content
+								sb.append(l, 0, lastquotidx);
+								break;
+							}
+							int slashlastidx = l.lastIndexOf('\\');
+							if (slashlastidx >= 0 && isWhiteSpaceOnlyFrom(l, slashlastidx + 1)) {
+								//the line ends with a slash, and some optional whitespace
+								sb.append(l, 0, slashlastidx);
+							} else {
+								//there are characters after the last slash
+								//append the whole line
+								sb.append(l);
+							}
+							sb.append('\n');
+							if (!it.hasNext()) {
+								throw new IllegalArgumentException("Unclosed quotes at line: " + it.getLineNumber());
+							}
+							l = it.next();
+						}
+						content = sb.toString();
+					} else {
+						content = content.trim();
+					}
+				}
+				handler.accept(name, content);
+			} else {
+				if (mdleading.equals(ws)) {
+					break;
+				}
+				throw new IllegalArgumentException("Illegal indentation for dependency information at line: "
+						+ it.getLineNumber() + " (Expected \"" + ws.replace("\t", "\\t") + "\" or \"\")");
+			}
+		} while (it.hasNext());
+	}
+
+	private static BundleDependency parseBundleDependency(String ws, LinePeekIterator it, String thisversion)
+			throws IOException {
+		String line = it.peek();
+		if (!line.startsWith(ws)) {
+			return null;
+		}
+		it.move();
+		if (!getLeadingWhitespace(line).equals(ws)) {
+			throw new IllegalArgumentException("Illegal indentation for dependency information at line: "
+					+ it.getLineNumber() + " (Expected \"" + ws.replace("\t", "\\t") + "\")");
+		}
+		BundleDependency.Builder builder = BundleDependency.builder();
+		//a dependency kind: version range
+		String depstr = line.substring(ws.length());
+		int depdotidx = depstr.indexOf(':');
+		if (depdotidx < 0) {
+			throw new IllegalArgumentException(
+					"Malformed dependency at line: " + it.getLineNumber() + " (Expected kind and version)");
+		}
+		String kindss = depstr.substring(0, depdotidx);
+		String rangestr = depstr.substring(depdotidx + 1);
+		if (thisversion != null) {
+			//replace "this" references with the version of the enclosing bundle if applicable
+			rangestr = rangestr.replace("this", thisversion);
+		}
+		try {
+			builder.setRange(VersionRange.valueOf(rangestr));
+		} catch (IllegalArgumentException e) {
+			throw new IllegalArgumentException(
+					"Failed to parse dependency version range: " + rangestr + " at line: " + it.getLineNumber(), e);
+		}
+		boolean hadkind = false;
+		for (String kind : COMMA_WHITESPACE_SPLIT.split(kindss)) {
+			if (kind.isEmpty()) {
+				continue;
+			}
+			if (!BundleDependency.isValidKind(kind)) {
+				throw new IllegalArgumentException(
+						"Invalid dependency kind: " + kind + " at line: " + it.getLineNumber() + " (Invalid format)");
+			}
+			if (StringUtils.startsWithIgnoreCase(kind, "nest-")) {
+				throw new IllegalArgumentException(
+						"Reserved dependency kind: " + kind + " at line: " + it.getLineNumber());
+			}
+			hadkind = true;
+			builder.addKind(kind);
+		}
+		if (!hadkind) {
+			throw new IllegalArgumentException("No dependency kind specified at line: " + it.getLineNumber());
+		}
+		if (it.hasNext()) {
+			//there may be metadata
+			String mdfirstline = it.peek();
+			String mdws = getLeadingWhitespace(mdfirstline);
+			if (mdws.startsWith(ws) && mdws.length() > ws.length()) {
+				//actually a metadata line
+				parseMetaDatas(it, ws, mdws, (name, content) -> {
+					if (builder.hasMetaData(name)) {
+						throw new IllegalArgumentException(
+								"Multiple metadata specified with name: " + name + " at line: " + it.getLineNumber());
+					}
+					builder.addMetaData(name, content);
+				});
+			}
+		}
+		return builder.build();
 	}
 
 	private static BundleDependencyList readBundleDependencyContents(LinePeekIterator it, BundleIdentifier bundleid,
 			String thisversion) throws IOException {
 		Collection<BundleDependency> result = new LinkedHashSet<>();
-		parsingif:
 		if (it.hasNext()) {
 			String firstline = it.peek();
 			String ws = getLeadingWhitespace(firstline);
@@ -552,143 +704,11 @@ public final class BundleDependencyInformation implements Externalizable {
 						"No dependency description found for: " + bundleid + " at line: " + it.getLineNumber());
 			}
 			do {
-				String line = it.peek();
-				if (!line.startsWith(ws)) {
-					break parsingif;
+				BundleDependency dep = parseBundleDependency(ws, it, thisversion);
+				if (dep == null) {
+					break;
 				}
-				it.move();
-				if (getLeadingWhitespace(line).equals(ws)) {
-					BundleDependency.Builder builder = BundleDependency.builder();
-					//a dependency kind: version range
-					String depstr = line.substring(ws.length());
-					int depdotidx = depstr.indexOf(':');
-					if (depdotidx < 0) {
-						throw new IllegalArgumentException(
-								"Malformed dependency at line: " + it.getLineNumber() + " (Expected kind and version)");
-					}
-					String kindss = depstr.substring(0, depdotidx);
-					String rangestr = depstr.substring(depdotidx + 1);
-					if (thisversion != null) {
-						//replace "this" references with the version of the enclosing bundle if applicable
-						rangestr = rangestr.replace("this", thisversion);
-					}
-					try {
-						builder.setRange(VersionRange.valueOf(rangestr));
-					} catch (IllegalArgumentException e) {
-						throw new IllegalArgumentException("Failed to parse dependency version range: " + rangestr
-								+ " at line: " + it.getLineNumber(), e);
-					}
-					boolean hadkind = false;
-					for (String kind : COMMA_WHITESPACE_SPLIT.split(kindss)) {
-						if (kind.isEmpty()) {
-							continue;
-						}
-						if (!BundleDependency.isValidKind(kind)) {
-							throw new IllegalArgumentException("Invalid dependency kind: " + kind + " at line: "
-									+ it.getLineNumber() + " (Invalid format)");
-						}
-						if (StringUtils.startsWithIgnoreCase(kind, "nest-")) {
-							throw new IllegalArgumentException(
-									"Reserved dependency kind: " + kind + " at line: " + it.getLineNumber());
-						}
-						hadkind = true;
-						builder.addKind(kind);
-					}
-					if (!hadkind) {
-						throw new IllegalArgumentException(
-								"No dependency kind specified at line: " + it.getLineNumber());
-					}
-					if (it.hasNext()) {
-						//there may be metadata
-						String mdfirstline = it.peek();
-						String mdws = getLeadingWhitespace(mdfirstline);
-						if (mdws.startsWith(ws) && mdws.length() > ws.length()) {
-							//actually a metadata line
-							metadata_parser:
-							do {
-								String mdline = it.peek();
-								if (!mdline.startsWith(mdws)) {
-									break metadata_parser;
-								}
-								it.move();
-								String mdleading = getLeadingWhitespace(mdline);
-								if (mdleading.equals(mdws)) {
-									//found a metadata line
-									int mddotidx = mdline.indexOf(':');
-									if (mddotidx < 0) {
-										throw new IllegalArgumentException("Malformed metadata at line: "
-												+ it.getLineNumber() + " (Expected name and content)");
-									}
-									String name = mdline.substring(0, mddotidx).trim();
-									if (name.isEmpty()) {
-										throw new IllegalArgumentException(
-												"Empty metadata name at line: " + it.getLineNumber());
-									}
-									if (!BundleDependency.isValidMetaDataName(name)) {
-										throw new IllegalArgumentException(
-												"Invalid metadata name: " + name + " at line: " + it.getLineNumber());
-									}
-									if (builder.hasMetaData(name)) {
-										throw new IllegalArgumentException("Multiple metadata specified with name: "
-												+ name + " at line: " + it.getLineNumber());
-									}
-									if (StringUtils.startsWithIgnoreCase(name, "nest-")) {
-										throw new IllegalArgumentException(
-												"Reserved metadata name: " + name + " at line: " + it.getLineNumber());
-									}
-									String content = mdline.substring(mddotidx + 1);
-									if (!content.isEmpty()) {
-										if (isStartsWithQuote(content)) {
-											int quotidx = content.indexOf('"');
-											//multi line metadata
-											StringBuilder sb = new StringBuilder();
-											String l = content.substring(quotidx + 1, content.length());
-											while (true) {
-												int lastquotidx = l.lastIndexOf('"');
-												if (lastquotidx >= 0 && isWhiteSpaceOnlyFrom(l, lastquotidx + 1)) {
-													//this line closes the content
-													sb.append(l, 0, lastquotidx);
-													break;
-												}
-												int slashlastidx = l.lastIndexOf('\\');
-												if (slashlastidx >= 0 && isWhiteSpaceOnlyFrom(l, slashlastidx + 1)) {
-													//the line ends with a slash, and some optional whitespace
-													sb.append(l, 0, slashlastidx);
-												} else {
-													//there are characters after the last slash
-													//append the whole line
-													sb.append(l);
-												}
-												sb.append('\n');
-												if (!it.hasNext()) {
-													throw new IllegalArgumentException(
-															"Unclosed quotes at line: " + it.getLineNumber());
-												}
-												l = it.next();
-											}
-											content = sb.toString();
-										} else {
-											content = content.trim();
-										}
-									}
-									builder.addMetaData(name, content);
-								} else {
-									if (mdleading.equals(ws)) {
-										break metadata_parser;
-									}
-									throw new IllegalArgumentException(
-											"Illegal indentation for dependency information at line: "
-													+ it.getLineNumber() + " (Expected \"" + ws.replace("\t", "\\t")
-													+ "\" or \"\")");
-								}
-							} while (it.hasNext());
-						}
-					}
-					result.add(builder.build());
-				} else {
-					throw new IllegalArgumentException("Illegal indentation for dependency information at line: "
-							+ it.getLineNumber() + " (Expected \"" + ws.replace("\t", "\\t") + "\")");
-				}
+				result.add(dep);
 			} while (it.hasNext());
 		}
 
@@ -698,7 +718,7 @@ public final class BundleDependencyInformation implements Externalizable {
 		return BundleDependencyList.create(result);
 	}
 
-	private static String getLeadingWhitespace(String s) {
+	static String getLeadingWhitespace(String s) {
 		if (s.isEmpty()) {
 			return "";
 		}
@@ -748,7 +768,7 @@ public final class BundleDependencyInformation implements Externalizable {
 		return true;
 	}
 
-	private static class LinePeekIterator {
+	static class LinePeekIterator {
 		private BufferedReader reader;
 		private String nextLine;
 		private int nextLineNumber;

@@ -1,0 +1,5 @@
+https://example.com/external.jar
+	classpath
+		entries: lib/first.jar
+	classpath
+		entries: lib/second.jar

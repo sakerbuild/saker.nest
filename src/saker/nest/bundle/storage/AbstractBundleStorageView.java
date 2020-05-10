@@ -16,6 +16,8 @@
 package saker.nest.bundle.storage;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.URI;
 import java.security.MessageDigest;
 import java.util.Map;
 import java.util.NavigableSet;
@@ -25,6 +27,8 @@ import saker.build.runtime.repository.TaskNotFoundException;
 import saker.build.task.TaskName;
 import saker.nest.bundle.AbstractNestRepositoryBundle;
 import saker.nest.bundle.BundleIdentifier;
+import saker.nest.bundle.BundleUtils;
+import saker.nest.bundle.Hashes;
 import saker.nest.bundle.NestRepositoryBundle;
 import saker.nest.exc.BundleLoadingFailedException;
 
@@ -64,4 +68,9 @@ public abstract class AbstractBundleStorageView implements BundleStorageView {
 			return null;
 		}
 	}
+
+	public InputStream openExternalDependencyURI(URI uri, Hashes expectedhashes) throws IOException {
+		return BundleUtils.openExternalDependencyURI(uri);
+	}
+
 }

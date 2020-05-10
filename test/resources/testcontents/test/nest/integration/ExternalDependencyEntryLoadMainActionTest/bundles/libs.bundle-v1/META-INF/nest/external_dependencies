@@ -1,0 +1,3 @@
+https://example.com/libs.jar
+	classpath
+		entries: /;lib/first.jar;lib/second.jar

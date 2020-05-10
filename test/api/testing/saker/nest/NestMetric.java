@@ -17,6 +17,9 @@ package testing.saker.nest;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URL;
 import java.nio.file.Path;
 import java.security.NoSuchAlgorithmException;
 import java.security.PublicKey;
@@ -74,5 +77,9 @@ public interface NestMetric {
 
 	public default Path overrideNativeLibraryPath(ClassLoader cl, Path libpath) {
 		return libpath;
+	}
+
+	public default URL toURL(URI uri) throws MalformedURLException {
+		return uri.toURL();
 	}
 }
