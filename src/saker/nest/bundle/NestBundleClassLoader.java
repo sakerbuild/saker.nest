@@ -89,6 +89,17 @@ public interface NestBundleClassLoader {
 	public Map<? extends BundleKey, ? extends NestBundleClassLoader> getClassPathDependencies();
 
 	/**
+	 * Gets the classloaders for the external class path dependencies of this class loader.
+	 * <p>
+	 * The resulting map contains the declared {@linkplain BundleInformation#getExternalDependencyInformation() external
+	 * dependencies} and their corresponding class loaders.
+	 * 
+	 * @return An immutable map of external class path dependencies.
+	 * @since saker.nest 0.8.5
+	 */
+	public Map<? extends ExternalArchiveKey, ? extends ExternalArchiveClassLoader> getExternalClassPathDependencies();
+
+	/**
 	 * Gets a hash created from this bundle and all class path dependencies included transitively.
 	 * <p>
 	 * The returned array is constructed by hashing the {@linkplain NestRepositoryBundle#getHash() hashes} of the

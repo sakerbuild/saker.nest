@@ -21,7 +21,8 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import saker.build.thirdparty.saker.util.classloader.MultiDataClassLoader;
 import saker.build.thirdparty.saker.util.io.IOUtils;
 
-public final class NestRepositoryExternalArchiveClassLoader extends MultiDataClassLoader {
+public final class NestRepositoryExternalArchiveClassLoader extends MultiDataClassLoader
+		implements ExternalArchiveClassLoader {
 	static {
 		registerAsParallelCapable();
 	}
@@ -45,7 +46,8 @@ public final class NestRepositoryExternalArchiveClassLoader extends MultiDataCla
 		return owner;
 	}
 
-	public AbstractExternalArchive getArchive() {
+	@Override
+	public AbstractExternalArchive getExternalArchive() {
 		return archive;
 	}
 

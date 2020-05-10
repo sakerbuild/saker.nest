@@ -39,9 +39,32 @@ import saker.build.thirdparty.saker.util.io.StreamUtils;
  * @since saker.nest 0.8.5
  * @see ExternalDependencyInformation
  * @see BundleInformation#getExternalDependencyInformation()
+ * @see NestBundleClassLoader#getExternalClassPathDependencies()
+ * @see JarExternalArchive
  */
 @PublicApi
 public interface ExternalArchive {
+	/**
+	 * Gets the archive key of this instance.
+	 * <p>
+	 * The archive key contains the origins of the archive.
+	 * 
+	 * @return The archive key.
+	 */
+	public ExternalArchiveKey getArchiveKey();
+
+	/**
+	 * Gets a hash of the contents of the archive.
+	 * <p>
+	 * The hash is produced by hashing the raw byte contents of the archive itself. If the archive was compressed, the
+	 * contents are not uncompressed for hashing.
+	 * <p>
+	 * The hash algorithm is implementation dependent. It is the same as used by {@link NestRepositoryBundle#getHash()}.
+	 * 
+	 * @return The hash. Modifications don't propagate, the array is cloned.
+	 */
+	public byte[] getHash();
+
 	/**
 	 * Gets the names of entries in this archive.
 	 * <p>

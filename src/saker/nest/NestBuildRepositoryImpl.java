@@ -70,7 +70,7 @@ public class NestBuildRepositoryImpl implements BuildRepository {
 					return null;
 				}
 				String hash = StringUtils.toHexString(owner.getSharedBundleHashWithClassPathDependencies());
-				SimpleExternalArchiveKey archivekey = extcl.getArchive().getArchiveKey();
+				SimpleExternalArchiveKey archivekey = extcl.getExternalArchive().getArchiveKey();
 
 				JSONObject json = new JSONObject();
 				json.put("hash", hash);

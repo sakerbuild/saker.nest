@@ -162,6 +162,20 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 	}
 
 	@Override
+	public Map<? extends ExternalArchiveKey, ? extends ExternalArchiveClassLoader> getExternalClassPathDependencies() {
+		return ImmutableUtils.makeImmutableLinkedHashMap(
+				new TransformingMap<SimpleExternalArchiveKey, DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader>, ExternalArchiveKey, ExternalArchiveClassLoader>(
+						externalDependencyClassLoaders) {
+					@Override
+					protected Entry<ExternalArchiveKey, ExternalArchiveClassLoader> transformEntry(
+							SimpleExternalArchiveKey key,
+							DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader> value) {
+						return ImmutableUtils.makeImmutableMapEntry(key, value.classLoader);
+					}
+				});
+	}
+
+	@Override
 	public byte[] getBundleHashWithClassPathDependencies() {
 		return getSharedBundleHashWithClassPathDependencies().clone();
 	}
@@ -439,7 +453,7 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 		}
 		for (DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader> extdcl : externalDependencyClassLoaders
 				.values()) {
-			hasher.update(extdcl.classLoader.getArchive().getSharedHash());
+			hasher.update(extdcl.classLoader.getExternalArchive().getSharedHash());
 		}
 		return hasher.digest();
 	}
