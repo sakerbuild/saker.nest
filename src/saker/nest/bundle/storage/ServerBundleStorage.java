@@ -629,12 +629,15 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 
 	private static <T> T makeServerRequest(boolean offline, String requesturl, ServerRequestHandler<T> handler)
 			throws IOException {
-		return makeServerRequest(offline, requesturl, null, handler);
+		return makeServerRequest(offline ? FLAG_REQUEST_OFFLINE : 0, requesturl, null, handler);
 	}
 
-	private static <T> T makeServerRequest(boolean offline, String requesturl, String method,
-			ServerRequestHandler<T> handler) throws IOException {
-		if (offline) {
+	private static final int FLAG_REQUEST_OFFLINE = 1 << 0;
+	private static final int FLAG_REQUEST_NO_DISCONNECT_ON_200 = 1 << 1;
+
+	private static <T> T makeServerRequest(int flags, String requesturl, String method, ServerRequestHandler<T> handler)
+			throws IOException {
+		if (((flags & FLAG_REQUEST_OFFLINE) == FLAG_REQUEST_OFFLINE)) {
 			throw new OfflineStorageIOException("Failed to make request in offline mode. (" + requesturl + ")");
 		}
 		try {
@@ -669,7 +672,9 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 						() -> unGzipizeInputStream(connection, connection.getErrorStream()),
 						connection::getHeaderField);
 			} finally {
-				connection.disconnect();
+				if (rc != 200 || ((flags & FLAG_REQUEST_NO_DISCONNECT_ON_200) != FLAG_REQUEST_NO_DISCONNECT_ON_200)) {
+					connection.disconnect();
+				}
 			}
 		} catch (IOException e) {
 			throw new IOException("Failed to execute server request. (" + requesturl + ")", e);
@@ -873,14 +878,15 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 	private BundleSignatureHolder downloadBundleSignature(BundleIdentifier bundleid, boolean offline)
 			throws IOException {
 		String requesturl = getBundleDownloadURL(bundleid);
-		return makeServerRequest(offline, requesturl, "HEAD", (rc, ins, errs, headerfunc) -> {
-			if (rc == HttpURLConnection.HTTP_OK) {
-				//HTTP OK
-				return BundleSignatureHolder.fromHeaders(headerfunc.apply("Nest-Bundle-Signature"),
-						headerfunc.apply("Nest-Bundle-Signature-Version"));
-			}
-			return null;
-		});
+		return makeServerRequest(offline ? FLAG_REQUEST_OFFLINE : 0, requesturl, "HEAD",
+				(rc, ins, errs, headerfunc) -> {
+					if (rc == HttpURLConnection.HTTP_OK) {
+						//HTTP OK
+						return BundleSignatureHolder.fromHeaders(headerfunc.apply("Nest-Bundle-Signature"),
+								headerfunc.apply("Nest-Bundle-Signature-Version"));
+					}
+					return null;
+				});
 	}
 
 	private static class DownloadedBundle {
@@ -1859,33 +1865,34 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 				throw new FileNotFoundException("Failed to download external dependency without SHA-256: " + uri);
 			}
 			String url = serverHost + "/external/mirror/" + BundleUtils.sha256(uri) + "/" + expectedhashes.sha256;
-			return makeServerRequest(offline, url, "GET", (rc, ins, errs, headerfunc) -> {
-				if (rc == HttpURLConnection.HTTP_OK) {
-					//HTTP OK
-					return ins.get();
-				}
-				IOException ee = null;
-				String errcontent = "";
-				try {
-					errcontent = StreamUtils.readStreamStringFully(errs.get());
-				} catch (IOException e) {
-					ee = e;
-				}
-				StringBuilder sb = new StringBuilder();
-				sb.append("Failed to download external dependency: ");
-				sb.append(uri);
-				sb.append(" from ");
-				sb.append(url);
-				sb.append(" Response code: ");
-				sb.append(rc);
-				if (!errcontent.isEmpty()) {
-					sb.append(" Response content: ");
-					sb.append(errcontent);
-				}
-				IOException exc = new IOException(sb.toString());
-				IOUtils.addExc(exc, ee);
-				throw exc;
-			});
+			return makeServerRequest((offline ? FLAG_REQUEST_OFFLINE : 0) | FLAG_REQUEST_NO_DISCONNECT_ON_200, url,
+					"GET", (rc, ins, errs, headerfunc) -> {
+						if (rc == HttpURLConnection.HTTP_OK) {
+							//HTTP OK
+							return ins.get();
+						}
+						IOException ee = null;
+						String errcontent = "";
+						try {
+							errcontent = StreamUtils.readStreamStringFully(errs.get());
+						} catch (IOException e) {
+							ee = e;
+						}
+						StringBuilder sb = new StringBuilder();
+						sb.append("Failed to download external dependency: ");
+						sb.append(uri);
+						sb.append(" from ");
+						sb.append(url);
+						sb.append(" Response code: ");
+						sb.append(rc);
+						if (!errcontent.isEmpty()) {
+							sb.append(" Response content: ");
+							sb.append(errcontent);
+						}
+						IOException exc = new IOException(sb.toString());
+						IOUtils.addExc(exc, ee);
+						throw exc;
+					});
 		}
 
 		@Override
