@@ -18,7 +18,12 @@ package saker.nest.bundle;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
+import java.net.ProtocolException;
 import java.net.URI;
+import java.net.URL;
+import java.net.URLConnection;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -51,6 +56,7 @@ import saker.build.thirdparty.saker.util.io.ByteArrayRegion;
 import saker.build.thirdparty.saker.util.io.UnsyncByteArrayOutputStream;
 import saker.build.util.java.JavaTools;
 import saker.nest.exc.IllegalArchiveEntryNameException;
+import testing.saker.nest.TestFlag;
 
 public class BundleUtils {
 	private static final Set<OpenOption> OPEN_OPTIONS_READ_WITHOUT_SHARING;
@@ -248,7 +254,7 @@ public class BundleUtils {
 	}
 
 	public static NavigableMap<URI, Hashes> getExternalDependencyInformationHashes(
-			ExternalDependencyInformation depinfo) {
+			ExternalDependencyInformation depinfo) throws IllegalArgumentException {
 		if (depinfo.isEmpty()) {
 			return Collections.emptyNavigableMap();
 		}
@@ -258,7 +264,7 @@ public class BundleUtils {
 	}
 
 	private static void collectExternalDependencyInformationHashes(ExternalDependencyInformation depinfo,
-			NavigableMap<URI, Hashes> result) {
+			NavigableMap<URI, Hashes> result) throws IllegalArgumentException {
 		for (Entry<URI, ? extends ExternalDependencyList> entry : depinfo.getDependencies().entrySet()) {
 			ExternalDependencyList deplist = entry.getValue();
 			result.compute(entry.getKey(), (uri, v) -> {
@@ -283,7 +289,7 @@ public class BundleUtils {
 		}
 	}
 
-	private static Hashes merge(Hashes first, Hashes second, Object context) {
+	private static Hashes merge(Hashes first, Hashes second, Object context) throws IllegalArgumentException {
 		if (first == null) {
 			return second;
 		}
@@ -294,7 +300,8 @@ public class BundleUtils {
 				mergeHash(first.sha1, second.sha1, "SHA-1", context), mergeHash(first.md5, second.md5, "MD5", context));
 	}
 
-	private static String mergeHash(String first, String second, String name, Object context) {
+	private static String mergeHash(String first, String second, String name, Object context)
+			throws IllegalArgumentException {
 		if (first == null) {
 			return second;
 		}
@@ -330,6 +337,26 @@ public class BundleUtils {
 			}
 		}
 		return false;
+	}
+
+	public static InputStream openExternalDependencyURI(URI uri)
+			throws MalformedURLException, IOException, ProtocolException {
+		URL url;
+		if (TestFlag.ENABLED) {
+			url = TestFlag.metric().toURL(uri);
+		} else {
+			url = uri.toURL();
+		}
+		URLConnection conn = url.openConnection();
+		if (conn instanceof HttpURLConnection) {
+			HttpURLConnection httpconn = (HttpURLConnection) conn;
+			httpconn.setRequestMethod("GET");
+			httpconn.setDoOutput(false);
+			httpconn.setDoInput(true);
+			httpconn.setConnectTimeout(10000);
+			httpconn.setReadTimeout(10000);
+		}
+		return conn.getInputStream();
 	}
 
 }

@@ -15,7 +15,8 @@
  */
 package saker.nest.bundle;
 
-import java.io.IOException;
+import java.net.URI;
+import java.net.URL;
 import java.util.Map;
 
 import saker.apiextract.api.PublicApi;
@@ -474,4 +475,38 @@ public interface NestBundleStorageConfiguration {
 	 * @see BuildRepository#lookupTask(TaskName)
 	 */
 	public TaskFactory<?> lookupTask(TaskName taskname) throws TaskNotFoundException;
+
+	/**
+	 * Loads the external archives from the argument dependency information.
+	 * <p>
+	 * The method will analyze the argument dependency information and load all dependency archives from it. Attachments
+	 * (source and documentation) are only loaded if they are present and their targeted archives are also loaded.
+	 * <p>
+	 * The dependency kinds are <b>not</b> taken into account.
+	 * <p>
+	 * If you want to prevent loading specific archives, construct a new {@link ExternalDependencyInformation} that
+	 * contains only the relevant information.
+	 * <p>
+	 * The {@link URI URIs} are loaded by converting them to an {@link URL} without any bundle storage specific
+	 * behaviour. The resources are not loaded from any mirror servers whatsoever.
+	 * <p>
+	 * If you expect the resources to be loaded from a mirror (e.g. using the saker.nest repository server), then use
+	 * {@link BundleStorageView#loadExternalArchives(ExternalDependencyInformation)} as that function takes bundle
+	 * storage specific configuration into account.
+	 * 
+	 * @param depinfo
+	 *            The dependency information.
+	 * @return The loaded external archives. Mapped to their {@linkplain ExternalArchiveKey external archive keys}.
+	 * @throws NullPointerException
+	 *             If the argument is <code>null</code>.
+	 * @throws IllegalArgumentException
+	 *             If the argument dependency information contains invalid data. (E.g. multiple different hashes are
+	 *             defined for a given {@link URI}.)
+	 * @throws ExternalArchiveLoadingFailedException
+	 *             If the loading failed.
+	 * @since saker.nest 0.8.5
+	 */
+	public Map<? extends ExternalArchiveKey, ? extends ExternalArchive> loadExternalArchives(
+			ExternalDependencyInformation depinfo)
+			throws NullPointerException, IllegalArgumentException, ExternalArchiveLoadingFailedException;
 }

@@ -28,6 +28,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -40,7 +41,6 @@ import java.util.UUID;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
-import java.util.function.BiConsumer;
 
 import saker.build.file.path.WildcardPath;
 import saker.build.runtime.repository.BuildRepository;
@@ -57,6 +57,7 @@ import saker.build.thirdparty.saker.util.io.FileUtils;
 import saker.build.thirdparty.saker.util.io.IOUtils;
 import saker.build.thirdparty.saker.util.io.SerialUtils;
 import saker.build.thirdparty.saker.util.io.StreamUtils;
+import saker.build.thirdparty.saker.util.io.function.IOBiFunction;
 import saker.build.thirdparty.saker.util.io.function.IOSupplier;
 import saker.build.thirdparty.saker.util.thread.ParallelExecutionException;
 import saker.build.thirdparty.saker.util.thread.ThreadUtils;
@@ -73,7 +74,6 @@ import saker.nest.bundle.SimpleExternalArchiveKey;
 import saker.nest.bundle.storage.AbstractBundleStorage;
 import saker.nest.bundle.storage.AbstractBundleStorageView;
 import saker.nest.bundle.storage.AbstractStorageKey;
-import saker.nest.exc.BundleDependencyUnsatisfiedException;
 import saker.nest.exc.ExternalArchiveLoadingFailedException;
 import saker.nest.meta.Versions;
 
@@ -216,31 +216,8 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 				+ Versions.VERSION_STRING_FULL + "/" + StringUtils.toHexString(repositoryHash);
 	}
 
-	private static class ExternalArchiveEntrySpec {
-		private Set<WildcardPath> entries;
-		private boolean includesMainArchive;
-
-		public ExternalArchiveEntrySpec(ExternalDependency dep) {
-			this.entries = dep.getEntries();
-			this.includesMainArchive = dep.isIncludesMainArchive();
-		}
-
-		public ExternalArchiveEntrySpec(ExternalAttachmentInformation info) {
-			this.entries = info.getEntries();
-			this.includesMainArchive = info.isIncludesMainArchive();
-		}
-
-		public Set<WildcardPath> getEntries() {
-			return entries;
-		}
-
-		public boolean isIncludesMainArchive() {
-			return includesMainArchive;
-		}
-	}
-
-	private static boolean specHasNonEmptyEntriesDependency(Iterable<? extends ExternalArchiveEntrySpec> deps) {
-		for (ExternalArchiveEntrySpec dep : deps) {
+	private static boolean hasNonEmptyEntriesDependency(Iterable<? extends ExternalDependency> deps) {
+		for (ExternalDependency dep : deps) {
 			if (!ObjectUtils.isNullOrEmpty(dep.getEntries())) {
 				return true;
 			}
@@ -248,8 +225,8 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 		return false;
 	}
 
-	private static boolean specIsMainArchiveIncluded(Iterable<? extends ExternalArchiveEntrySpec> deps) {
-		for (ExternalArchiveEntrySpec dep : deps) {
+	private static boolean isMainArchiveIncluded(Iterable<? extends ExternalDependency> deps) {
+		for (ExternalDependency dep : deps) {
 			if (dep.isIncludesMainArchive()) {
 				return true;
 			}
@@ -257,8 +234,8 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 		return false;
 	}
 
-	private static boolean specIncludesEntryName(String name, Set<ExternalArchiveEntrySpec> deps) {
-		for (ExternalArchiveEntrySpec dep : deps) {
+	private static boolean includesEntryName(String name, Iterable<? extends ExternalDependency> deps) {
+		for (ExternalDependency dep : deps) {
 			Set<WildcardPath> entries = dep.getEntries();
 			if (ObjectUtils.isNullOrEmpty(entries)) {
 				continue;
@@ -266,6 +243,17 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 			if (BundleUtils.isWildcardsInclude(name, entries)) {
 				return true;
 			}
+		}
+		return false;
+	}
+
+	private static boolean attachmentTargetsEntryName(String name, ExternalAttachmentInformation dep) {
+		Set<WildcardPath> entries = dep.getTargetEntries();
+		if (ObjectUtils.isNullOrEmpty(entries)) {
+			return false;
+		}
+		if (BundleUtils.isWildcardsInclude(name, entries)) {
+			return true;
 		}
 		return false;
 	}
@@ -292,9 +280,18 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 	public Map<SimpleExternalArchiveKey, ? extends AbstractExternalArchive> loadExternalArchives(
 			ExternalDependencyInformation depinfo, AbstractBundleStorageView domainbundlestorage)
 			throws NullPointerException, IllegalArgumentException, ExternalArchiveLoadingFailedException {
+		IOBiFunction<URI, Hashes, InputStream> inputsupplier = domainbundlestorage::openExternalDependencyURI;
+
+		return loadExternalArchives(depinfo, inputsupplier);
+	}
+
+	public Map<SimpleExternalArchiveKey, ? extends AbstractExternalArchive> loadExternalArchives(
+			ExternalDependencyInformation depinfo,
+			IOBiFunction<? super URI, ? super Hashes, ? extends InputStream> inputsupplier)
+			throws ExternalArchiveLoadingFailedException {
 		Objects.requireNonNull(depinfo, "dependency info");
 		Map<SimpleExternalArchiveKey, ExternalArchiveReference> archiverefs = loadExternalArchivesImpl(depinfo,
-				domainbundlestorage);
+				inputsupplier);
 		LinkedHashMap<SimpleExternalArchiveKey, AbstractExternalArchive> result = new LinkedHashMap<>();
 		for (Entry<SimpleExternalArchiveKey, ExternalArchiveReference> entry : archiverefs.entrySet()) {
 			result.put(entry.getKey(), entry.getValue().archive);
@@ -302,135 +299,286 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 		return result;
 	}
 
+	private static Map<URI, ExternalAttachmentInformation> getMainTargettingAttachments(
+			ExternalDependencyList deplist) {
+		Map<URI, ExternalAttachmentInformation> result = null;
+		for (Entry<URI, ExternalAttachmentInformation> entry : deplist.getSourceAttachments().entrySet()) {
+			ExternalAttachmentInformation attachmentinfo = entry.getValue();
+			if (attachmentinfo.isTargetsMainArchive()) {
+				if (result == null) {
+					result = new LinkedHashMap<>();
+				}
+				result.put(entry.getKey(), attachmentinfo);
+			}
+		}
+		for (Entry<URI, ExternalAttachmentInformation> entry : deplist.getDocumentationAttachments().entrySet()) {
+			ExternalAttachmentInformation attachmentinfo = entry.getValue();
+			if (attachmentinfo.isTargetsMainArchive()) {
+				if (result == null) {
+					result = new LinkedHashMap<>();
+				}
+				result.put(entry.getKey(), attachmentinfo);
+			}
+		}
+		if (result == null) {
+			return Collections.emptyMap();
+		}
+		return result;
+	}
+
+	private static Map<URI, ExternalAttachmentInformation> getEntryTargettingAttachments(String entryname,
+			ExternalDependencyList deplist) {
+		Map<URI, ExternalAttachmentInformation> result = null;
+		for (Entry<URI, ExternalAttachmentInformation> entry : deplist.getSourceAttachments().entrySet()) {
+			ExternalAttachmentInformation attachmentinfo = entry.getValue();
+			if (attachmentTargetsEntryName(entryname, attachmentinfo)) {
+				if (result == null) {
+					result = new LinkedHashMap<>();
+				}
+				result.put(entry.getKey(), attachmentinfo);
+			}
+		}
+		for (Entry<URI, ExternalAttachmentInformation> entry : deplist.getDocumentationAttachments().entrySet()) {
+			ExternalAttachmentInformation attachmentinfo = entry.getValue();
+			if (attachmentTargetsEntryName(entryname, attachmentinfo)) {
+				if (result == null) {
+					result = new LinkedHashMap<>();
+				}
+				result.put(entry.getKey(), attachmentinfo);
+			}
+		}
+		if (result == null) {
+			return Collections.emptyMap();
+		}
+		return result;
+	}
+
+	private static class ArchiveCollector {
+		private List<Entry<SimpleExternalArchiveKey, ExternalArchiveReference>> archives = new ArrayList<>();
+		private List<ArchiveCollector> subCollectors = new ArrayList<>();
+
+		public ArchiveCollector addSubCollector() {
+			ArchiveCollector collector = new ArchiveCollector();
+			subCollectors.add(collector);
+			return collector;
+		}
+
+		public int reserveArchives(int count) {
+			int idx = archives.size();
+
+			while (count-- > 0) {
+				archives.add(null);
+			}
+			return idx;
+		}
+
+		public void setArchive(int idx, SimpleExternalArchiveKey key, ExternalArchiveReference ref) {
+			archives.set(idx, ImmutableUtils.makeImmutableMapEntry(key, ref));
+		}
+
+		public List<Entry<SimpleExternalArchiveKey, ExternalArchiveReference>> flatten() {
+			List<Entry<SimpleExternalArchiveKey, ExternalArchiveReference>> result = new ArrayList<>();
+			flattenInto(result);
+			return result;
+		}
+
+		public void flattenInto(List<Entry<SimpleExternalArchiveKey, ExternalArchiveReference>> result) {
+			result.addAll(archives);
+			for (ArchiveCollector sc : subCollectors) {
+				sc.flattenInto(result);
+			}
+		}
+	}
+
 	private Map<SimpleExternalArchiveKey, ExternalArchiveReference> loadExternalArchivesImpl(
-			ExternalDependencyInformation extdependencies, AbstractBundleStorageView domainbundlestorage)
+			ExternalDependencyInformation extdependencies,
+			IOBiFunction<? super URI, ? super Hashes, ? extends InputStream> inputsupplier)
 			throws ExternalArchiveLoadingFailedException {
 		if (extdependencies.isEmpty()) {
 			return Collections.emptyMap();
 		}
 
-		//TODO load attachments, but only those which target included archives
-
 		Map<URI, Hashes> urihashes = BundleUtils.getExternalDependencyInformationHashes(extdependencies);
 
-		List<Entry<URI, Set<ExternalArchiveEntrySpec>>> loaddependencies = new ArrayList<>();
+		List<Entry<URI, ExternalDependencyList>> loaddependencies = new ArrayList<>();
 
-		List<List<Entry<SimpleExternalArchiveKey, ExternalArchiveReference>>> loadedarchiverefs = new ArrayList<>();
+		ArchiveCollector archivecollector = new ArchiveCollector();
 
 		for (Entry<URI, ? extends ExternalDependencyList> entry : extdependencies.getDependencies().entrySet()) {
-			Set<ExternalArchiveEntrySpec> depbuffer = new LinkedHashSet<>();
 			ExternalDependencyList deplist = entry.getValue();
-			for (ExternalDependency dep : deplist.getDependencies()) {
-				depbuffer.add(new ExternalArchiveEntrySpec(dep));
-			}
-			for (ExternalAttachmentInformation information : deplist.getSourceAttachments().values()) {
-				depbuffer.add(new ExternalArchiveEntrySpec(information));
-			}
-			for (ExternalAttachmentInformation information : deplist.getDocumentationAttachments().values()) {
-				depbuffer.add(new ExternalArchiveEntrySpec(information));
-			}
-
-			if (depbuffer.isEmpty()) {
+			if (deplist.isEmpty()) {
 				continue;
 			}
 
 			URI uri = entry.getKey();
-			loaddependencies.add(ImmutableUtils.makeImmutableMapEntry(uri, depbuffer));
-
-			//entry load list
-			loadedarchiverefs.add(new ArrayList<>());
-			//main load list
-			loadedarchiverefs.add(new ArrayList<>());
+			loaddependencies.add(ImmutableUtils.makeImmutableMapEntry(uri, deplist));
 		}
 		if (loaddependencies.isEmpty()) {
 			return Collections.emptyMap();
 		}
 
 		try (ThreadWorkPool loaderpool = ThreadUtils.newDynamicWorkPool(null, "ext-dep-loader-", null, true)) {
-			int depidx = 0;
-			for (Entry<URI, Set<ExternalArchiveEntrySpec>> entry : loaddependencies) {
-				URI uri = entry.getKey();
-				Set<ExternalArchiveEntrySpec> deps = entry.getValue();
-				Hashes urihash = urihashes.get(uri);
+			for (Entry<URI, ExternalDependencyList> entry : loaddependencies) {
+				ExternalDependencyList deplist = entry.getValue();
 
-				List<Entry<SimpleExternalArchiveKey, ExternalArchiveReference>> entryloadlist = loadedarchiverefs
-						.get(depidx++);
-				List<Entry<SimpleExternalArchiveKey, ExternalArchiveReference>> mainloadlist = loadedarchiverefs
-						.get(depidx++);
+				boolean mainincluded;
 
-				Path archivepath = getExternalArchivePath(uri, urihash);
-				loadExternalArchive(loaderpool, uri, archivepath, urihash, domainbundlestorage, (extarchive, e) -> {
-					if (e != null) {
-						throw new BundleDependencyUnsatisfiedException("Failed to load external dependency: " + uri, e);
-					}
-					if (urihash.sha256 != null && !urihash.sha256.equals(extarchive.hashes.sha256)) {
-						throw new BundleDependencyUnsatisfiedException(
-								"Failed to load external dependency: " + uri + " (SHA-256 mismatch, expected: "
-										+ urihash.sha256 + " actual: " + extarchive.hashes.sha256 + ")");
-					}
-					if (urihash.sha1 != null && !urihash.sha1.equals(extarchive.hashes.sha1)) {
-						throw new BundleDependencyUnsatisfiedException(
-								"Failed to load external dependency: " + uri + " (SHA-1 mismatch, expected: "
-										+ urihash.sha1 + " actual: " + extarchive.hashes.sha1 + ")");
-					}
-					if (urihash.md5 != null && !urihash.md5.equals(extarchive.hashes.md5)) {
-						throw new BundleDependencyUnsatisfiedException(
-								"Failed to load external dependency: " + uri + " (MD5 mismatch, expected: "
-										+ urihash.md5 + " actual: " + extarchive.hashes.md5 + ")");
-					}
+				{
+					URI uri = entry.getKey();
+					Hashes urihash = urihashes.get(uri);
+					Set<? extends ExternalDependency> dependencies = deplist.getDependencies();
+					mainincluded = isMainArchiveIncluded(dependencies);
+					Path archivepath = getExternalArchivePath(uri, urihash);
 
-					if (specHasNonEmptyEntriesDependency(deps)) {
-						List<String> includedentrynames = new ArrayList<>();
-						for (String ename : extarchive.archive.getEntryNames()) {
-							if (!specIncludesEntryName(ename, deps)) {
-								continue;
+					ArchiveCollector deparchivecollector = archivecollector.addSubCollector();
+
+					loadExternalArchive(loaderpool, uri, archivepath, urihash, inputsupplier, (extarchive, e) -> {
+						if (e != null) {
+							throw new ExternalArchiveLoadingFailedException(
+									"Failed to load external dependency: " + uri, e);
+						}
+						checkHashes(uri, urihash, extarchive);
+
+						if (mainincluded) {
+							int mainidx = deparchivecollector.reserveArchives(1);
+							deparchivecollector.setArchive(mainidx, new SimpleExternalArchiveKey(uri), extarchive);
+						}
+
+						if (hasNonEmptyEntriesDependency(dependencies)) {
+							Collection<String> includedentrynames = new LinkedHashSet<>();
+							for (String ename : extarchive.archive.getEntryNames()) {
+								if (!includesEntryName(ename, dependencies)) {
+									continue;
+								}
+								includedentrynames.add(ename);
+								Map<URI, ExternalAttachmentInformation> attachments = getEntryTargettingAttachments(
+										ename, deplist);
+								if (!ObjectUtils.isNullOrEmpty(attachments)) {
+									ArchiveCollector attachcollector = deparchivecollector.addSubCollector();
+									loadExternalAttachmentsImpl(loaderpool, attachcollector, attachments, urihashes,
+											inputsupplier);
+								}
 							}
-							includedentrynames.add(ename);
-							entryloadlist.add(null);
-						}
-						int i = 0;
-						for (String ename : includedentrynames) {
-							int idx = i++;
-							loadEmbeddedArchive(loaderpool, extarchive, ename, archivepath, uri,
-									(embeddedarchive, ee) -> {
-										if (ee != null) {
-											throw new BundleDependencyUnsatisfiedException(
-													"Failed to load external dependency entry: " + ename + " in " + uri,
-													ee);
-										}
-										entryloadlist.set(idx, ImmutableUtils.makeImmutableMapEntry(
-												new SimpleExternalArchiveKey(uri, ename), embeddedarchive));
-									});
+							int i = deparchivecollector.reserveArchives(includedentrynames.size());
+							for (String ename : includedentrynames) {
+								int idx = i++;
+								loadEmbeddedArchive(loaderpool, extarchive, ename, archivepath, uri,
+										(embeddedarchive, ee) -> {
+											if (ee != null) {
+												throw new ExternalArchiveLoadingFailedException(
+														"Failed to load external dependency entry: " + ename + " in "
+																+ uri,
+														ee);
+											}
+											deparchivecollector.setArchive(idx,
+													new SimpleExternalArchiveKey(uri, ename), embeddedarchive);
+										});
 
+							}
 						}
-					}
-					if (specIsMainArchiveIncluded(deps)) {
-						mainloadlist.add(
-								ImmutableUtils.makeImmutableMapEntry(new SimpleExternalArchiveKey(uri), extarchive));
-					}
-				});
+					});
+				}
+				if (mainincluded) {
+					ArchiveCollector attachcollector = archivecollector.addSubCollector();
+					Map<URI, ExternalAttachmentInformation> attachments = getMainTargettingAttachments(deplist);
 
+					loadExternalAttachmentsImpl(loaderpool, attachcollector, attachments, urihashes, inputsupplier);
+				}
 			}
 		} catch (ParallelExecutionException e) {
 			throw new ExternalArchiveLoadingFailedException(e);
 		}
 		Map<SimpleExternalArchiveKey, ExternalArchiveReference> result = new LinkedHashMap<>();
-		for (List<Entry<SimpleExternalArchiveKey, ExternalArchiveReference>> depcllist : loadedarchiverefs) {
-			for (Entry<SimpleExternalArchiveKey, ExternalArchiveReference> dcl : depcllist) {
-				if (dcl == null) {
-					//shouldn't happen, ever.
-					throw new BundleDependencyUnsatisfiedException(
-							"Failed to load external dependencies. (Internal consistency error)");
-				}
-				result.put(dcl.getKey(), dcl.getValue());
+		for (Entry<SimpleExternalArchiveKey, ExternalArchiveReference> dcl : archivecollector.flatten()) {
+			if (dcl == null) {
+				//shouldn't happen, ever.
+				throw new ExternalArchiveLoadingFailedException(
+						"Failed to load external dependencies. (Internal consistency error)");
 			}
+			result.putIfAbsent(dcl.getKey(), dcl.getValue());
 		}
 		return result;
 	}
 
+	private void loadExternalAttachmentsImpl(ThreadWorkPool loaderpool, ArchiveCollector attachcollector,
+			Map<URI, ExternalAttachmentInformation> attachments, Map<URI, Hashes> urihashes,
+			IOBiFunction<? super URI, ? super Hashes, ? extends InputStream> inputsupplier)
+			throws ExternalArchiveLoadingFailedException {
+		for (Entry<URI, ExternalAttachmentInformation> attachmententry : attachments.entrySet()) {
+			URI attachmenturi = attachmententry.getKey();
+			ExternalAttachmentInformation attachmentinfo = attachmententry.getValue();
+			Hashes attachmenturihash = urihashes.get(attachmenturi);
+
+			Path attachmentarchivepath = getExternalArchivePath(attachmenturi, attachmenturihash);
+
+			loadExternalArchive(loaderpool, attachmenturi, attachmentarchivepath, attachmenturihash, inputsupplier,
+					(extarchive, e) -> {
+						if (e != null) {
+							throw new ExternalArchiveLoadingFailedException(
+									"Failed to load external attachment: " + attachmenturi, e);
+						}
+						checkHashes(attachmenturi, attachmenturihash, extarchive);
+
+						if (attachmentinfo.isIncludesMainArchive()) {
+							int mainidx = attachcollector.reserveArchives(1);
+							attachcollector.setArchive(mainidx, new SimpleExternalArchiveKey(attachmenturi),
+									extarchive);
+						}
+						if (!attachmentinfo.getEntries().isEmpty()) {
+							Collection<String> includedentrynames = new LinkedHashSet<>();
+							for (String ename : extarchive.archive.getEntryNames()) {
+								if (!attachmentTargetsEntryName(ename, attachmentinfo)) {
+									continue;
+								}
+								includedentrynames.add(ename);
+							}
+							int i = attachcollector.reserveArchives(includedentrynames.size());
+
+							for (String ename : includedentrynames) {
+								int idx = i++;
+								loadEmbeddedArchive(loaderpool, extarchive, ename, attachmentarchivepath, attachmenturi,
+										(embeddedarchive, ee) -> {
+											if (ee != null) {
+												throw new ExternalArchiveLoadingFailedException(
+														"Failed to load external dependency attachment: " + ename
+																+ " in " + attachmenturi,
+														ee);
+											}
+											attachcollector.setArchive(idx,
+													new SimpleExternalArchiveKey(attachmenturi, ename),
+													embeddedarchive);
+										});
+
+							}
+						}
+					});
+		}
+	}
+
+	private static void checkHashes(URI uri, Hashes urihash, ExternalArchiveReference extarchive)
+			throws ExternalArchiveLoadingFailedException {
+		if (urihash.sha256 != null && !urihash.sha256.equals(extarchive.hashes.sha256)) {
+			throw new ExternalArchiveLoadingFailedException("Failed to load external dependency: " + uri
+					+ " (SHA-256 mismatch, expected: " + urihash.sha256 + " actual: " + extarchive.hashes.sha256 + ")");
+		}
+		if (urihash.sha1 != null && !urihash.sha1.equals(extarchive.hashes.sha1)) {
+			throw new ExternalArchiveLoadingFailedException("Failed to load external dependency: " + uri
+					+ " (SHA-1 mismatch, expected: " + urihash.sha1 + " actual: " + extarchive.hashes.sha1 + ")");
+		}
+		if (urihash.md5 != null && !urihash.md5.equals(extarchive.hashes.md5)) {
+			throw new ExternalArchiveLoadingFailedException("Failed to load external dependency: " + uri
+					+ " (MD5 mismatch, expected: " + urihash.md5 + " actual: " + extarchive.hashes.md5 + ")");
+		}
+	}
+
+	private interface ExternalArchiveLoadConsumer {
+		public void accept(ExternalArchiveReference reference, Exception e)
+				throws ExternalArchiveLoadingFailedException;
+	}
+
 	private void loadEmbeddedArchive(ThreadWorkPool loaderpool, ExternalArchiveReference containingarchive,
-			String ename, Path archivepath, URI archiveuri,
-			BiConsumer<ExternalArchiveReference, Exception> resultconsumer) {
+			String ename, Path archivepath, URI archiveuri, ExternalArchiveLoadConsumer resultconsumer)
+			throws ExternalArchiveLoadingFailedException {
 		Path entrypath = archivepath.resolveSibling("entries").resolve(ename);
 		ExternalArchiveReference extarchive = externalArchives.get(entrypath);
 		if (extarchive != null) {
@@ -447,8 +595,9 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 		});
 	}
 
-	public void loadExternalArchive(ThreadWorkPool loaderpool, URI uri, Path archivepath, Hashes expectedhashes,
-			AbstractBundleStorageView bundlestorage, BiConsumer<ExternalArchiveReference, Exception> resultconsumer) {
+	private void loadExternalArchive(ThreadWorkPool loaderpool, URI uri, Path archivepath, Hashes expectedhashes,
+			IOBiFunction<? super URI, ? super Hashes, ? extends InputStream> inputsupplier,
+			ExternalArchiveLoadConsumer resultconsumer) throws ExternalArchiveLoadingFailedException {
 		ExternalArchiveReference extarchive = externalArchives.get(archivepath);
 		if (extarchive != null) {
 			resultconsumer.accept(extarchive, null);
@@ -456,7 +605,7 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 		}
 		loaderpool.offer(() -> {
 			try {
-				ExternalArchiveReference archive = loadExternalArchive(uri, archivepath, expectedhashes, bundlestorage);
+				ExternalArchiveReference archive = loadExternalArchive(uri, archivepath, expectedhashes, inputsupplier);
 				resultconsumer.accept(archive, null);
 			} catch (Exception e) {
 				resultconsumer.accept(null, e);
@@ -465,9 +614,10 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 	}
 
 	private ExternalArchiveReference loadExternalArchive(URI uri, Path archivepath, Hashes expectedhashes,
-			AbstractBundleStorageView bundlestorage) throws IOException, ExternalArchiveLoadingFailedException {
+			IOBiFunction<? super URI, ? super Hashes, ? extends InputStream> inputsupplier)
+			throws IOException, ExternalArchiveLoadingFailedException {
 		return loadExternalArchiveImpl(new SimpleExternalArchiveKey(uri), archivepath, expectedhashes, uri, () -> {
-			return bundlestorage.openExternalDependencyURI(uri, expectedhashes);
+			return inputsupplier.apply(uri, expectedhashes);
 		});
 	}
 

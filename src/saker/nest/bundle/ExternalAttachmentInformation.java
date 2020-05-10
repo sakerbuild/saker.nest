@@ -52,12 +52,17 @@ public final class ExternalAttachmentInformation implements Externalizable {
 
 	/**
 	 * A singleton instance that contains no properties.
+	 * <p>
+	 * It {@linkplain #isIncludesMainArchive() includes the main archive} and {@linkplain #isTargetsMainArchive()
+	 * targets the main archive}.
 	 */
 	public static final ExternalAttachmentInformation EMPTY = new ExternalAttachmentInformation();
 	static {
 		EMPTY.entries = Collections.emptyNavigableSet();
 		EMPTY.targetEntries = Collections.emptyNavigableSet();
 		EMPTY.metaData = Collections.emptyMap();
+		EMPTY.targetsMainArchive = true;
+		EMPTY.includesMainArchive = true;
 	}
 	private String sha256Hash;
 	private String sha1Hash;
@@ -245,9 +250,9 @@ public final class ExternalAttachmentInformation implements Externalizable {
 	@Override
 	public String toString() {
 		return getClass().getSimpleName() + "["
-				+ (ObjectUtils.isNullOrEmpty(entries) ? "entries=" + entries + ", " : "")
-				+ (ObjectUtils.isNullOrEmpty(targetEntries) ? "targetEntries=" + targetEntries + ", " : "")
-				+ (ObjectUtils.isNullOrEmpty(metaData) ? "metaData=" + metaData + ", " : "") + "includesMainArchive="
+				+ (!ObjectUtils.isNullOrEmpty(entries) ? "entries=" + entries + ", " : "")
+				+ (!ObjectUtils.isNullOrEmpty(targetEntries) ? "targetEntries=" + targetEntries + ", " : "")
+				+ (!ObjectUtils.isNullOrEmpty(metaData) ? "metaData=" + metaData + ", " : "") + "includesMainArchive="
 				+ includesMainArchive + ", targetsMainArchive=" + targetsMainArchive + "]";
 	}
 

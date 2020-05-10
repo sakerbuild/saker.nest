@@ -15,7 +15,7 @@
  */
 package saker.nest.bundle.storage;
 
-import java.io.IOException;
+import java.net.URI;
 import java.util.Map;
 import java.util.Set;
 
@@ -154,7 +154,34 @@ public interface BundleStorageView {
 	public Map<String, ? extends Set<? extends BundleIdentifier>> lookupBundleIdentifiers(String bundlename)
 			throws NullPointerException, IllegalArgumentException;
 
-	public Map<? extends ExternalArchiveKey, ? extends ExternalArchive> loadExternalArchives(
+	/**
+	 * Loads the external archives from the argument dependency information.
+	 * <p>
+	 * The method works the same way as
+	 * {@link NestBundleStorageConfiguration#loadExternalArchives(ExternalDependencyInformation)}, however, it also
+	 * takes bundle storage specific configuration into account.
+	 * <p>
+	 * E.g. if this bundle storage is a {@linkplain ServerBundleStorageView server bundle storage} then the resources
+	 * may be loaded from the mirrors on the associated repository server.
+	 * <p>
+	 * It can be advantageous to use this method instead of the one in
+	 * {@link NestBundleStorageConfiguration#loadExternalArchives(ExternalDependencyInformation)
+	 * NestBundleStorageConfiguration} when resolving dependencies if an existing bundle, so the external dependencies
+	 * are resolved in a reliable manner.
+	 * 
+	 * @param depinfo
+	 *            The dependency information.
+	 * @return The loaded external archives. Mapped to their {@linkplain ExternalArchiveKey external archive keys}.
+	 * @throws NullPointerException
+	 *             If the argument is <code>null</code>.
+	 * @throws IllegalArgumentException
+	 *             If the argument dependency information contains invalid data. (E.g. multiple different hashes are
+	 *             defined for a given {@link URI}.)
+	 * @throws ExternalArchiveLoadingFailedException
+	 *             If the loading failed.
+	 * @since saker.nest 0.8.5
+	 */
+	public abstract Map<? extends ExternalArchiveKey, ? extends ExternalArchive> loadExternalArchives(
 			ExternalDependencyInformation depinfo)
-			throws NullPointerException, IllegalArgumentException, IOException, ExternalArchiveLoadingFailedException;
+			throws NullPointerException, IllegalArgumentException, ExternalArchiveLoadingFailedException;
 }

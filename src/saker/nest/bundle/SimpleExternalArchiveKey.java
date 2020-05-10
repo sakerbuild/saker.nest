@@ -101,8 +101,7 @@ public class SimpleExternalArchiveKey implements ExternalArchiveKey, Externaliza
 
 	@Override
 	public String toString() {
-		return getClass().getSimpleName() + "[" + (uri != null ? "uri=" + uri + ", " : "")
-				+ (entryName != null ? "entryName=" + entryName : "") + "]";
+		return getClass().getSimpleName() + "[" + uri + (entryName != null ? " : " + entryName : "") + "]";
 	}
 
 }

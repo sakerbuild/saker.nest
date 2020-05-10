@@ -57,6 +57,8 @@ public class BundleExternalDependenciesFileUnitTest extends SakerTestCase {
 		ExternalDependencyInformation attachments = read("attachments.txt");
 		assertEquals(attachments.getDependencies().get(examplemyjar).getSourceAttachments().keySet(),
 				setOf(examplemyjarsources));
+		assertTrue(attachments.getDependencies().get(examplemyjar).getSourceAttachments().values().iterator().next()
+				.isTargetsMainArchive());
 		assertEquals(attachments.getDependencies().get(examplemyjar).getDocumentationAttachments().keySet(),
 				setOf(examplemyjardoc));
 
@@ -77,12 +79,20 @@ public class BundleExternalDependenciesFileUnitTest extends SakerTestCase {
 		ExternalDependencyInformation attachmentshash = read("attachmentshash.txt");
 		assertEquals(attachmentshash.getDependencies().get(examplemyjar).getSourceAttachments().values().iterator()
 				.next().getSha256Hash(), "1234567890123456789012345678901234567890123456789012345678901234");
+		assertTrue(attachmentshash.getDependencies().get(examplemyjar).getSourceAttachments().values().iterator().next()
+				.isTargetsMainArchive());
 		assertEquals(attachmentshash.getDependencies().get(examplemyjar).getSourceAttachments().values().iterator()
 				.next().getSha1Hash(), "12345678901234567890123456789012abcdef12");
 		assertEquals(attachmentshash.getDependencies().get(examplemyjar).getSourceAttachments().values().iterator()
 				.next().getMd5Hash(), "12345678901234567890123456789012");
 
 		assertException(IllegalArgumentException.class, () -> read("conflictinghashes.txt"));
+
+		ExternalDependencyInformation attachmentandkind = read("attachmentandkind.txt");
+		assertEquals(attachmentandkind.getDependencies().get(examplemyjar).getSourceAttachments().keySet(),
+				setOf(examplemyjarsources));
+		assertTrue(attachmentandkind.getDependencies().get(examplemyjar).getSourceAttachments().get(examplemyjarsources)
+				.isTargetsMainArchive());
 	}
 
 	private static <T> T atIndex(Iterable<T> iterable, int idx) {

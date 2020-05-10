@@ -70,6 +70,8 @@ import saker.nest.bundle.BundleInformation;
 import saker.nest.bundle.BundleKey;
 import saker.nest.bundle.BundleUtils;
 import saker.nest.bundle.DependencyConstraintConfiguration;
+import saker.nest.bundle.ExternalArchive;
+import saker.nest.bundle.ExternalArchiveKey;
 import saker.nest.bundle.ExternalDependency;
 import saker.nest.bundle.ExternalDependencyInformation;
 import saker.nest.bundle.ExternalDependencyList;
@@ -1267,6 +1269,13 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 
 		domainClassLoaders.putAll(constructeddomaincls);
 		return result;
+	}
+
+	@Override
+	public Map<? extends ExternalArchiveKey, ? extends ExternalArchive> loadExternalArchives(
+			ExternalDependencyInformation depinfo)
+			throws NullPointerException, IllegalArgumentException, ExternalArchiveLoadingFailedException {
+		return repository.loadExternalArchives(depinfo, (uri, hashes) -> BundleUtils.openExternalDependencyURI(uri));
 	}
 
 	private ExternalDependencyInformation filterExternalDependencyForClasspath(

@@ -380,6 +380,13 @@ public class ParameterBundleStorage extends AbstractBundleStorage {
 		}
 
 		@Override
+		public Map<? extends ExternalArchiveKey, ? extends ExternalArchive> loadExternalArchives(
+				ExternalDependencyInformation depinfo)
+				throws NullPointerException, IllegalArgumentException, ExternalArchiveLoadingFailedException {
+			return repository.loadExternalArchives(depinfo, this);
+		}
+
+		@Override
 		public void updateStorageViewHash(MessageDigest digest) {
 			digest.update(ConfiguredRepositoryStorage.STORAGE_TYPE_PARAMETER.getBytes(StandardCharsets.UTF_8));
 			for (Entry<BundleIdentifier, LoadedViewBundleInfo> entry : bundles.entrySet()) {
@@ -417,13 +424,6 @@ public class ParameterBundleStorage extends AbstractBundleStorage {
 			}
 			userparameters.put(repositoryid + "." + storagename + "." + PARAMETER_NEST_REPOSITORY_BUNDLES,
 					bundlessb.toString());
-		}
-
-		@Override
-		public Map<? extends ExternalArchiveKey, ? extends ExternalArchive> loadExternalArchives(
-				ExternalDependencyInformation depinfo)
-				throws NullPointerException, IllegalArgumentException, ExternalArchiveLoadingFailedException {
-			return repository.loadExternalArchives(depinfo, this);
 		}
 
 		@Override
