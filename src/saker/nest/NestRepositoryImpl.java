@@ -42,6 +42,7 @@ import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 
+import saker.build.file.path.SakerPath;
 import saker.build.file.path.WildcardPath;
 import saker.build.runtime.repository.BuildRepository;
 import saker.build.runtime.repository.RepositoryBuildEnvironment;
@@ -76,11 +77,14 @@ import saker.nest.bundle.storage.AbstractBundleStorageView;
 import saker.nest.bundle.storage.AbstractStorageKey;
 import saker.nest.exc.ExternalArchiveLoadingFailedException;
 import saker.nest.meta.Versions;
+import testing.saker.nest.TestFlag;
 
 public final class NestRepositoryImpl implements SakerRepository, NestRepository {
+
 	static final char CHAR_CL_IDENITIFER_SEPARATOR = '\n';
 
 	private static final String STORAGE_DIRECTORY_NAME_EXTERNAL_ARCHIVES = "external";
+	private static final String EXTERNAL_ARCHIVES_SUBDIRECTORY_ENTRIES = "entries";
 
 	private volatile boolean closed = false;
 
@@ -274,6 +278,25 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 				}
 			}
 		}
+		String uripath = uri.getPath();
+		if (uripath != null) {
+			try {
+				SakerPath spath = SakerPath.valueOf(uripath);
+				String fn = spath.getFileName();
+				if (fn != null) {
+					if (!EXTERNAL_ARCHIVES_SUBDIRECTORY_ENTRIES.equalsIgnoreCase(fn)) {
+						return path.resolve(fn);
+					}
+				}
+			} catch (IllegalArgumentException e) {
+				//couldn't parse path. fallback to default
+				//throw if testing, so we can fix it
+				if (TestFlag.ENABLED) {
+					throw e;
+				}
+			}
+		}
+		//fallback to default well know file name
 		return path.resolve("archive.jar");
 	}
 
@@ -579,7 +602,7 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 	private void loadEmbeddedArchive(ThreadWorkPool loaderpool, ExternalArchiveReference containingarchive,
 			String ename, Path archivepath, URI archiveuri, ExternalArchiveLoadConsumer resultconsumer)
 			throws ExternalArchiveLoadingFailedException {
-		Path entrypath = archivepath.resolveSibling("entries").resolve(ename);
+		Path entrypath = archivepath.resolveSibling(EXTERNAL_ARCHIVES_SUBDIRECTORY_ENTRIES).resolve(ename);
 		ExternalArchiveReference extarchive = externalArchives.get(entrypath);
 		if (extarchive != null) {
 			resultconsumer.accept(extarchive, null);

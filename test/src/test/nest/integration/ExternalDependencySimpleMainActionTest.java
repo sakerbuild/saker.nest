@@ -24,6 +24,8 @@ import saker.build.file.path.SakerPath;
 import saker.build.file.provider.LocalFileProvider;
 import saker.build.runtime.repository.SakerRepository;
 import saker.build.thirdparty.saker.util.ObjectUtils;
+import saker.nest.bundle.ExternalArchiveClassLoader;
+import saker.nest.bundle.JarExternalArchive;
 import test.nest.util.ExternalArchiveResolvingNestMetric;
 import testing.saker.SakerTest;
 import testing.saker.build.tests.EnvironmentTestCase;
@@ -44,6 +46,14 @@ public class ExternalDependencySimpleMainActionTest extends ManualLoadedReposito
 
 	public static class ExternalClass {
 		public static void main(String[] args) {
+			//test that the external archive is loaded with a non-generated file name
+			ExternalArchiveClassLoader cl = (ExternalArchiveClassLoader) ExternalClass.class.getClassLoader();
+			Path jarpath = ((JarExternalArchive) cl.getExternalArchive()).getJarPath();
+			String fn = jarpath.getFileName().toString();
+			if (!"external.jar".equals(fn)) {
+				throw new AssertionError(fn);
+			}
+
 			System.setProperty(PROPERTY_NAME, args[0]);
 		}
 	}
