@@ -174,6 +174,7 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 		return dependencyClassLoaders;
 	}
 
+	@Override
 	public BundleKey getBundleKey() {
 		return bundleKey;
 	}

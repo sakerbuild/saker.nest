@@ -20,6 +20,8 @@ import java.util.Map;
 import saker.apiextract.api.PublicApi;
 import saker.nest.NestRepository;
 import saker.nest.bundle.lookup.BundleLookup;
+import saker.nest.bundle.storage.BundleStorageView;
+import saker.nest.bundle.storage.StorageViewKey;
 
 //only implementation is NestRepositoryBundleClassLoader
 /**
@@ -106,4 +108,16 @@ public interface NestBundleClassLoader {
 	 * @return The bundle lookup.
 	 */
 	public BundleLookup getRelativeBundleLookup();
+
+	/**
+	 * Gets the bundle key this classloader is associated with.
+	 * <p>
+	 * The returned bundle key can be used to retrieve the {@linkplain BundleStorageView bundle storage view} that was
+	 * used to construct this classloader.
+	 * 
+	 * @return The bundle key.
+	 * @since saker.nest 0.8.5
+	 * @see NestBundleStorageConfiguration#getBundleStorageViewForKey(StorageViewKey)
+	 */
+	public BundleKey getBundleKey();
 }
