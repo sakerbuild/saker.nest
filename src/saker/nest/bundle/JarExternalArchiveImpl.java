@@ -21,8 +21,11 @@ import java.nio.channels.SeekableByteChannel;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.security.NoSuchAlgorithmException;
+import java.util.Enumeration;
 import java.util.NavigableSet;
+import java.util.TreeSet;
 import java.util.UUID;
+import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 
 import saker.build.file.provider.LocalFileProvider;
@@ -31,12 +34,13 @@ import saker.build.thirdparty.saker.util.io.ByteArrayRegion;
 import saker.build.thirdparty.saker.util.io.IOUtils;
 import saker.build.thirdparty.saker.util.io.JarFileUtils;
 import saker.build.thirdparty.saker.util.io.SerialUtils;
+import saker.nest.exc.IllegalArchiveEntryNameException;
 
 public class JarExternalArchiveImpl extends AbstractExternalArchive implements JarExternalArchive {
 	private final SimpleExternalArchiveKey archiveKey;
 	private final SeekableByteChannel channel;
 	private final JarFile jar;
-	private final LazySupplier<NavigableSet<String>> entryNames;
+	private final NavigableSet<String> entryNames;
 
 	private final LazySupplier<byte[]> jarHash = LazySupplier.of(this::computeJarHash);
 
@@ -44,7 +48,9 @@ public class JarExternalArchiveImpl extends AbstractExternalArchive implements J
 		this.archiveKey = archiveKey;
 		this.channel = channel;
 		this.jar = jar;
-		this.entryNames = LazySupplier.of(() -> BundleUtils.getJarEntryNames(jar));
+
+		//compute the entry names eagerly to discover any invalid names
+		this.entryNames = getEntryNamesValidate(jar);
 	}
 
 	public static JarExternalArchiveImpl create(SimpleExternalArchiveKey archiveKey, Path jarpath) throws IOException {
@@ -74,7 +80,7 @@ public class JarExternalArchiveImpl extends AbstractExternalArchive implements J
 
 	@Override
 	public NavigableSet<String> getEntryNames() {
-		return entryNames.get();
+		return entryNames;
 	}
 
 	@Override
@@ -82,11 +88,7 @@ public class JarExternalArchiveImpl extends AbstractExternalArchive implements J
 		if (name == null) {
 			return false;
 		}
-		NavigableSet<String> entries = entryNames.getIfComputed();
-		if (entries != null) {
-			return entries.contains(name);
-		}
-		return jar.getEntry(name) != null;
+		return entryNames.contains(name);
 	}
 
 	@Override
@@ -104,6 +106,7 @@ public class JarExternalArchiveImpl extends AbstractExternalArchive implements J
 		return Paths.get(jar.getName());
 	}
 
+	@Override
 	public byte[] getHash() {
 		return getSharedHash().clone();
 	}
@@ -146,5 +149,22 @@ public class JarExternalArchiveImpl extends AbstractExternalArchive implements J
 			throw new AssertionError("Hash algorithm not found: " + JarNestRepositoryBundleImpl.BUNDLE_HASH_ALGORITHM,
 					e);
 		}
+	}
+
+	private static NavigableSet<String> getEntryNamesValidate(JarFile jar) {
+		NavigableSet<String> entrynames = new TreeSet<>(String::compareToIgnoreCase);
+		Enumeration<JarEntry> entries = jar.entries();
+		while (entries.hasMoreElements()) {
+			JarEntry jarentry = entries.nextElement();
+			if (jarentry.isDirectory()) {
+				continue;
+			}
+			String entryname = jarentry.getName();
+			BundleUtils.checkArchiveEntryName(entryname);
+			if (!entrynames.add(entryname)) {
+				throw new IllegalArchiveEntryNameException(entryname);
+			}
+		}
+		return entrynames;
 	}
 }
