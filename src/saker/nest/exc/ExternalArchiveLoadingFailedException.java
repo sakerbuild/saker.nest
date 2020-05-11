@@ -12,14 +12,14 @@ public class ExternalArchiveLoadingFailedException extends NestResourceLoadingFa
 	private static final long serialVersionUID = 1L;
 
 	/**
-	 * @see NestResourceLoadingFailedException#NestResourceLoadingException()
+	 * @see NestResourceLoadingFailedException#NestResourceLoadingFailedException()
 	 */
 	public ExternalArchiveLoadingFailedException() {
 		super();
 	}
 
 	/**
-	 * @see NestResourceLoadingFailedException#NestResourceLoadingException(String, Throwable, boolean, boolean)
+	 * @see NestResourceLoadingFailedException#NestResourceLoadingFailedException(String, Throwable, boolean, boolean)
 	 */
 	protected ExternalArchiveLoadingFailedException(String message, Throwable cause, boolean enableSuppression,
 			boolean writableStackTrace) {
@@ -27,21 +27,21 @@ public class ExternalArchiveLoadingFailedException extends NestResourceLoadingFa
 	}
 
 	/**
-	 * @see NestResourceLoadingFailedException#NestResourceLoadingException(String, Throwable)
+	 * @see NestResourceLoadingFailedException#NestResourceLoadingFailedException(String, Throwable)
 	 */
 	public ExternalArchiveLoadingFailedException(String message, Throwable cause) {
 		super(message, cause);
 	}
 
 	/**
-	 * @see NestResourceLoadingFailedException#NestResourceLoadingException(String)
+	 * @see NestResourceLoadingFailedException#NestResourceLoadingFailedException(String)
 	 */
 	public ExternalArchiveLoadingFailedException(String message) {
 		super(message);
 	}
 
 	/**
-	 * @see NestResourceLoadingFailedException#NestResourceLoadingException(Throwable)
+	 * @see NestResourceLoadingFailedException#NestResourceLoadingFailedException(Throwable)
 	 */
 	public ExternalArchiveLoadingFailedException(Throwable cause) {
 		super(cause);
