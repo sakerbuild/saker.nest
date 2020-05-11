@@ -7,7 +7,26 @@ pool:
 steps:
 - script: curl https://api.nest.saker.build/bundle/download/saker.build-v$(curl -s https://mirror.nest.saker.build/badges/saker.build/latest.txt) -o saker.build.jar
   displayName: 'Download saker.build'
-- script: java -jar saker.build.jar -bd build test
+- script: java -jar saker.build.jar -bd build -trace pwd://build/build_test.trace test
   displayName: 'Test'  
-- script: java -jar saker.build.jar -bd build exportall
+- task: PublishBuildArtifacts@1
+  condition: always()
+  displayName: 'Publish test trace'
+  inputs:
+    pathtoPublish: build/build_test.trace
+    artifactName: 'test_trace'
+- script: java -jar saker.build.jar -bd build -trace pwd://build/build_exportall.trace exportall
   displayName: 'Export'
+- task: PublishBuildArtifacts@1
+  condition: always()
+  displayName: 'Publish export trace'
+  inputs:
+    pathtoPublish: build/build_exportall.trace
+    artifactName: 'export_trace_$(J_JAVA_MAJOR)'
+- task: PublishBuildArtifacts@1
+  displayName: 'Publish exported libraries'
+  inputs:
+    pathtoPublish: build/saker.jar.create/
+    artifactName: 'export_jars'
+    parallel: true
+    
