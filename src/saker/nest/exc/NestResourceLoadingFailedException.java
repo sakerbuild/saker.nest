@@ -38,7 +38,7 @@ public class NestResourceLoadingFailedException extends Exception {
 	}
 
 	/**
-	 * @see Exception#Exception( Throwable)
+	 * @see Exception#Exception(Throwable)
 	 */
 	public NestResourceLoadingFailedException(Throwable cause) {
 		super(cause);

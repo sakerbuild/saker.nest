@@ -51,7 +51,7 @@ public class BundleStorageInitializationException extends RuntimeException {
 	}
 
 	/**
-	 * @see RuntimeException#RuntimeException( Throwable)
+	 * @see RuntimeException#RuntimeException(Throwable)
 	 */
 	public BundleStorageInitializationException(Throwable cause) {
 		super(cause);

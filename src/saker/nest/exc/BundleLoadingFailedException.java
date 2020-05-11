@@ -28,14 +28,14 @@ public class BundleLoadingFailedException extends NestResourceLoadingFailedExcep
 	private static final long serialVersionUID = 1L;
 
 	/**
-	 * @see NestResourceLoadingFailedException#NestResourceLoadingException()
+	 * @see NestResourceLoadingFailedException#NestResourceLoadingFailedException()
 	 */
 	public BundleLoadingFailedException() {
 		super();
 	}
 
 	/**
-	 * @see NestResourceLoadingFailedException#NestResourceLoadingException(String, Throwable, boolean, boolean)
+	 * @see NestResourceLoadingFailedException#NestResourceLoadingFailedException(String, Throwable, boolean, boolean)
 	 */
 	protected BundleLoadingFailedException(String message, Throwable cause, boolean enableSuppression,
 			boolean writableStackTrace) {
@@ -43,21 +43,21 @@ public class BundleLoadingFailedException extends NestResourceLoadingFailedExcep
 	}
 
 	/**
-	 * @see NestResourceLoadingFailedException#NestResourceLoadingException(String, Throwable)
+	 * @see NestResourceLoadingFailedException#NestResourceLoadingFailedException(String, Throwable)
 	 */
 	public BundleLoadingFailedException(String message, Throwable cause) {
 		super(message, cause);
 	}
 
 	/**
-	 * @see NestResourceLoadingFailedException#NestResourceLoadingException(String)
+	 * @see NestResourceLoadingFailedException#NestResourceLoadingFailedException(String)
 	 */
 	public BundleLoadingFailedException(String message) {
 		super(message);
 	}
 
 	/**
-	 * @see NestResourceLoadingFailedException#NestResourceLoadingException( Throwable)
+	 * @see NestResourceLoadingFailedException#NestResourceLoadingFailedException(Throwable)
 	 */
 	public BundleLoadingFailedException(Throwable cause) {
 		super(cause);

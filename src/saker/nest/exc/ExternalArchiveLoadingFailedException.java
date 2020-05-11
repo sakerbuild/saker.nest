@@ -41,7 +41,7 @@ public class ExternalArchiveLoadingFailedException extends NestResourceLoadingFa
 	}
 
 	/**
-	 * @see NestResourceLoadingFailedException#NestResourceLoadingException( Throwable)
+	 * @see NestResourceLoadingFailedException#NestResourceLoadingException(Throwable)
 	 */
 	public ExternalArchiveLoadingFailedException(Throwable cause) {
 		super(cause);

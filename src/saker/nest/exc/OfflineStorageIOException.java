@@ -46,7 +46,7 @@ public class OfflineStorageIOException extends IOException {
 	}
 
 	/**
-	 * @see IOException#IOException( Throwable)
+	 * @see IOException#IOException(Throwable)
 	 */
 	public OfflineStorageIOException(Throwable cause) {
 		super(cause);

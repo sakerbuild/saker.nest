@@ -53,7 +53,7 @@ public class BundleDependencyUnsatisfiedException extends RuntimeException {
 	}
 
 	/**
-	 * @see RuntimeException#RuntimeException( Throwable)
+	 * @see RuntimeException#RuntimeException(Throwable)
 	 */
 	public BundleDependencyUnsatisfiedException(Throwable cause) {
 		super(cause);
