@@ -22,7 +22,7 @@ steps:
   displayName: 'Publish export trace'
   inputs:
     pathtoPublish: build/build_exportall.trace
-    artifactName: 'export_trace_$(J_JAVA_MAJOR)'
+    artifactName: 'export_trace'
 - task: PublishBuildArtifacts@1
   displayName: 'Publish exported libraries'
   inputs:

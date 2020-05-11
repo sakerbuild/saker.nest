@@ -459,8 +459,9 @@ public final class ExternalAttachmentInformation implements Externalizable {
 		 * @return <code>this</code>
 		 * @see ExternalAttachmentInformation#isIncludesMainArchive()
 		 */
-		public void setIncludesMainArchive(boolean includesMainArchive) {
+		public Builder setIncludesMainArchive(boolean includesMainArchive) {
 			this.includesMainArchive = includesMainArchive;
+			return this;
 		}
 
 		/**
@@ -475,8 +476,9 @@ public final class ExternalAttachmentInformation implements Externalizable {
 		 * @return <code>this</code>
 		 * @see ExternalAttachmentInformation#isTargetsMainArchive()
 		 */
-		public void setTargetsMainArchive(boolean targetsMainArchive) {
+		public Builder setTargetsMainArchive(boolean targetsMainArchive) {
 			this.targetsMainArchive = targetsMainArchive;
+			return this;
 		}
 
 		/**
