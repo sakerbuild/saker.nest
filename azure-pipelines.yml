@@ -8,25 +8,25 @@ strategy:
   matrix:
     Java8:
       J_JAVA_MAJOR: '8'
-      J_JDKS: '8'
+      J_JDKS: '8 9'
     Java9:
       J_JAVA_MAJOR: '9'
-      J_JDKS: '8'
+      J_JDKS: '8 9'
     Java10:
       J_JAVA_MAJOR: '10'
-      J_JDKS: '8 10'
+      J_JDKS: '8 9 10'
     Java11:
       J_JAVA_MAJOR: '11'
-      J_JDKS: '8 11'
+      J_JDKS: '8 9 11'
     Java12:
       J_JAVA_MAJOR: '12'
-      J_JDKS: '8 12'
+      J_JDKS: '8 9 12'
     Java13:
       J_JAVA_MAJOR: '13'
-      J_JDKS: '8 13'
+      J_JDKS: '8 9 13'
     Java14:
       J_JAVA_MAJOR: '14'
-      J_JDKS: '8 14'
+      J_JDKS: '8 9 14'
 steps:
 - script: curl https://api.nest.saker.build/bundle/download/saker.build-v$(curl -s https://mirror.nest.saker.build/badges/saker.build/latest.txt) -o saker.build.jar
   displayName: 'Download saker.build'
