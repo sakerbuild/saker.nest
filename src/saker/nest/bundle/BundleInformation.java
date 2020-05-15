@@ -800,6 +800,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	 * classpath.
 	 * 
 	 * @return <code>true</code> if the bundle requires the opened JDK compiler classes.
+	 * @since saker.nest 0.8.5
 	 * @see #MANIFEST_NAME_CLASSPATH_SPECIAL_DEPENDENCY
 	 * @see #SPECIAL_CLASSPATH_DEPENDENCY_JDK_COMPILER_OPEN
 	 */

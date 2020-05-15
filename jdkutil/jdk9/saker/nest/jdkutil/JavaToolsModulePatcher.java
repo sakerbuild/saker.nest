@@ -61,6 +61,10 @@ public class JavaToolsModulePatcher {
 		return JAVA_TOOLS_CLASSLOADER;
 	}
 
+	public static boolean isDifferentFromDefaultJavaToolsClassLoader() {
+		return true;
+	}
+
 	private static volatile ClassLoader JAVA_TOOLS_CLASSLOADER = createJavaToolsClassLoader();
 
 	private static ClassLoader createJavaToolsClassLoader() throws AssertionError {

@@ -29,12 +29,18 @@ public class JavaToolsModulePatcher {
 	}
 
 	public static ClassLoader getJavaToolsClassLoaderIfLoaded() {
-		//TODO use JavaTools.getJDKToolsClassLoaderIfLoaded() when running on saker.build 0.8.12 and above
+		if (saker.build.meta.Versions.VERSION_FULL_COMPOUND >= 8_012) {
+			//TODO use JavaTools.getJDKToolsClassLoaderIfLoaded() when running on saker.build 0.8.12 and above
+		}
 		try {
 			return JavaTools.getJDKToolsClassLoader();
 		} catch (IOException e) {
 		}
 		return null;
+	}
+
+	public static boolean isDifferentFromDefaultJavaToolsClassLoader() {
+		return false;
 	}
 
 }
