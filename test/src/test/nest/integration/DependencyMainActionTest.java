@@ -91,8 +91,7 @@ public class DependencyMainActionTest extends ManualLoadedRepositoryTestCase {
 				NestIntegrationTestUtils.createParameterBundlesUserParameter(bundleclasses.keySet(), bundleoutdir),
 				"-bundle", "simple.bundle-v1", "first-arg");
 
-		assertEquals(System.getProperty(PROPERTY_NAME), "first-arg");
-		System.clearProperty(PROPERTY_NAME);
+		assertEquals(System.clearProperty(PROPERTY_NAME), "first-arg");
 	}
 
 }

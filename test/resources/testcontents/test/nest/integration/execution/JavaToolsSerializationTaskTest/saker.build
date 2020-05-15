@@ -1,0 +1,6 @@
+simple {
+	simple.task()
+}
+opens {
+	opens.task()
+}

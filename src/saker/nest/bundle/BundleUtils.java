@@ -56,6 +56,7 @@ import saker.build.thirdparty.saker.util.io.ByteArrayRegion;
 import saker.build.thirdparty.saker.util.io.UnsyncByteArrayOutputStream;
 import saker.build.util.java.JavaTools;
 import saker.nest.exc.IllegalArchiveEntryNameException;
+import saker.nest.jdkutil.JavaToolsModulePatcher;
 import testing.saker.nest.TestFlag;
 
 public class BundleUtils {
@@ -212,15 +213,26 @@ public class BundleUtils {
 	}
 
 	public static ClassLoader createAppropriateParentClassLoader(BundleInformation info) {
-		if (!info.isJdkToolsDependent()) {
-			return REPOSITORY_CLASSPATH_CLASSLOADER;
+		boolean jdktoolsopen = info.isJdkCompilerOpenDependent();
+		if (jdktoolsopen) {
+			try {
+				return MultiClassLoader.create(ImmutableUtils.asUnmodifiableArrayList(
+						JavaToolsModulePatcher.getJavaToolsClassLoader(), REPOSITORY_CLASSPATH_CLASSLOADER));
+			} catch (IOException e) {
+				throw new UncheckedIOException("Failed to create JDK tools class loader.", e);
+			}
 		}
-		try {
-			return MultiClassLoader.create(ImmutableUtils.asUnmodifiableArrayList(JavaTools.getJDKToolsClassLoader(),
-					REPOSITORY_CLASSPATH_CLASSLOADER));
-		} catch (IOException e) {
-			throw new UncheckedIOException("Failed to create JDK tools class loader.", e);
+
+		boolean jdktools = info.isJdkToolsDependent();
+		if (jdktools) {
+			try {
+				return MultiClassLoader.create(ImmutableUtils
+						.asUnmodifiableArrayList(JavaTools.getJDKToolsClassLoader(), REPOSITORY_CLASSPATH_CLASSLOADER));
+			} catch (IOException e) {
+				throw new UncheckedIOException("Failed to create JDK tools class loader.", e);
+			}
 		}
+		return REPOSITORY_CLASSPATH_CLASSLOADER;
 	}
 
 	public static void checkArchiveEntryName(String ename) throws IllegalArchiveEntryNameException {

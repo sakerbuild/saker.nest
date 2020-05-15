@@ -32,7 +32,9 @@ import saker.build.thirdparty.saker.util.classloader.ClassLoaderResolver;
 import saker.build.thirdparty.saker.util.classloader.ClassLoaderResolverRegistry;
 import saker.build.thirdparty.saker.util.classloader.SingleClassLoaderResolver;
 import saker.nest.bundle.BundleIdentifier;
+import saker.nest.bundle.BundleInformation;
 import saker.nest.bundle.SimpleExternalArchiveKey;
+import saker.nest.jdkutil.JavaToolsModulePatcher;
 import saker.nest.bundle.NestRepositoryBundleClassLoader;
 import saker.nest.bundle.NestRepositoryBundleClassLoader.DependentClassLoader;
 import saker.nest.bundle.NestRepositoryExternalArchiveClassLoader;
@@ -42,12 +44,16 @@ import saker.nest.thirdparty.org.json.JSONTokener;
 import testing.saker.nest.TestFlag;
 
 public class NestBuildRepositoryImpl implements BuildRepository {
+	private static final String CLASSLOADER_ID_SAKER_NEST_JDK_COMPILER_OPEN = "saker.nest."
+			+ BundleInformation.SPECIAL_CLASSPATH_DEPENDENCY_JDK_COMPILER_OPEN;
+
 	private final RepositoryBuildEnvironment environment;
 
 	private final ConfiguredRepositoryStorage configuredStorage;
 
 	private final String coreClassLoaderResolverId;
 	private final String bundlesClassLoaderResolverId;
+	private final String jdkCompilerOpensClassLoaderResolverId;
 	private final SingleClassLoaderResolver coreClassLoaderResolver = new SingleClassLoaderResolver("classes",
 			NestBuildRepositoryImpl.class.getClassLoader());
 	private final ClassLoaderResolver bundlesClassLoaderResolver = new ClassLoaderResolver() {
@@ -132,6 +138,28 @@ public class NestBuildRepositoryImpl implements BuildRepository {
 			return null;
 		}
 	};
+	private static final ClassLoaderResolver jdkCompilerOpenedClassLoaderResolver = new ClassLoaderResolver() {
+
+		@Override
+		public String getClassLoaderIdentifier(ClassLoader classloader) {
+			if (classloader == JavaToolsModulePatcher.getJavaToolsClassLoaderIfLoaded()) {
+				return CLASSLOADER_ID_SAKER_NEST_JDK_COMPILER_OPEN;
+			}
+			return null;
+		}
+
+		@Override
+		public ClassLoader getClassLoaderForIdentifier(String identifier) {
+			if (CLASSLOADER_ID_SAKER_NEST_JDK_COMPILER_OPEN.equals(identifier)) {
+				try {
+					return JavaToolsModulePatcher.getJavaToolsClassLoader();
+				} catch (IOException e) {
+					//TODO log the error for build trace or something
+				}
+			}
+			return null;
+		}
+	};
 
 	public static NestBuildRepositoryImpl create(NestRepositoryImpl nestRepository,
 			RepositoryBuildEnvironment environment) {
@@ -143,10 +171,13 @@ public class NestBuildRepositoryImpl implements BuildRepository {
 
 		coreClassLoaderResolverId = nestRepository.getCoreClassLoaderResolverId(environment.getIdentifier());
 		bundlesClassLoaderResolverId = coreClassLoaderResolverId + "/bundles";
+		jdkCompilerOpensClassLoaderResolverId = coreClassLoaderResolverId + "/"
+				+ BundleInformation.SPECIAL_CLASSPATH_DEPENDENCY_JDK_COMPILER_OPEN;
 
 		ClassLoaderResolverRegistry clregistry = environment.getClassLoaderResolverRegistry();
 		clregistry.register(coreClassLoaderResolverId, coreClassLoaderResolver);
 		clregistry.register(bundlesClassLoaderResolverId, bundlesClassLoaderResolver);
+		clregistry.register(jdkCompilerOpensClassLoaderResolverId, jdkCompilerOpenedClassLoaderResolver);
 
 		configuredStorage = createConfiguredRepository(nestRepository, environment);
 	}
@@ -214,6 +245,7 @@ public class NestBuildRepositoryImpl implements BuildRepository {
 		ClassLoaderResolverRegistry clregistry = environment.getClassLoaderResolverRegistry();
 		clregistry.unregister(bundlesClassLoaderResolverId, bundlesClassLoaderResolver);
 		clregistry.unregister(coreClassLoaderResolverId, coreClassLoaderResolver);
+		clregistry.unregister(jdkCompilerOpensClassLoaderResolverId, jdkCompilerOpenedClassLoaderResolver);
 
 		closeConfiguredRepository();
 	}

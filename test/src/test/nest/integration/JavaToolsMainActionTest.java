@@ -23,6 +23,7 @@ import java.util.TreeMap;
 import saker.build.file.path.SakerPath;
 import saker.build.file.provider.LocalFileProvider;
 import saker.build.runtime.repository.SakerRepository;
+import saker.build.util.java.JavaTools;
 import testing.saker.SakerTest;
 import testing.saker.build.tests.EnvironmentTestCase;
 import testing.saker.build.tests.TestUtils;
@@ -34,8 +35,39 @@ public class JavaToolsMainActionTest extends ManualLoadedRepositoryTestCase {
 	private static final String PROPERTY_NAME = "a2bda6ce-d969-444b-8f9b-317e4096d9ee";
 
 	public static class SimpleMain {
-		public static void main(String[] args) throws ClassNotFoundException {
+		public static void main(String[] args) throws Exception {
+			//test saker.build classpath as well
+			System.out.println(SakerPath.valueOf("/home"));
 			Class.forName("com.sun.source.tree.Tree", false, SimpleMain.class.getClassLoader());
+			if (JavaTools.getCurrentJavaMajorVersion() >= 9) {
+				try {
+					//this class is not exported, this shouldn't work. an exception is expected
+					Class.forName("com.sun.tools.javac.platform.PlatformUtils", false,
+							SimpleMain.class.getClassLoader()).getMethod("lookupPlatformDescription", String.class)
+							.invoke(null, "8");
+					throw new AssertionError();
+				} catch (IllegalAccessException e) {
+					//expected
+				} catch (Exception e) {
+					throw e;
+				}
+			}
+			System.setProperty(PROPERTY_NAME, args[0]);
+		}
+	}
+
+	public static class OpensMain {
+		public static void main(String[] args) throws Exception {
+			//test saker.build classpath as well
+			System.out.println(SakerPath.valueOf("/home"));
+			Class.forName("com.sun.source.tree.Tree", false, OpensMain.class.getClassLoader());
+			if (JavaTools.getCurrentJavaMajorVersion() >= 9) {
+				//this should work as the jdk.compiler is exported
+				Object platformdescriptionobject = Class
+						.forName("com.sun.tools.javac.platform.PlatformUtils", false, OpensMain.class.getClassLoader())
+						.getMethod("lookupPlatformDescription", String.class).invoke(null, "8");
+				System.out.println(platformdescriptionobject);
+			}
 			System.setProperty(PROPERTY_NAME, args[0]);
 		}
 	}
@@ -44,6 +76,7 @@ public class JavaToolsMainActionTest extends ManualLoadedRepositoryTestCase {
 	protected void runTestOnRepo(SakerRepository repo) throws Exception {
 		TreeMap<String, Set<Class<?>>> bundleclasses = TestUtils.<String, Set<Class<?>>>treeMapBuilder()//
 				.put("simple.bundle-v1", Collections.singleton(SimpleMain.class))//
+				.put("opens.bundle-v1", Collections.singleton(OpensMain.class))//
 				.build();
 
 		System.clearProperty(PROPERTY_NAME);
@@ -57,9 +90,12 @@ public class JavaToolsMainActionTest extends ManualLoadedRepositoryTestCase {
 		repo.executeAction("main", "-Unest.server.offline=true",
 				NestIntegrationTestUtils.createParameterBundlesUserParameter(bundleclasses.keySet(), bundleoutdir),
 				"-bundle", "simple.bundle-v1", "first-arg");
+		assertEquals(System.clearProperty(PROPERTY_NAME), "first-arg");
 
-		assertEquals(System.getProperty(PROPERTY_NAME), "first-arg");
-		System.clearProperty(PROPERTY_NAME);
+		repo.executeAction("main", "-Unest.server.offline=true",
+				NestIntegrationTestUtils.createParameterBundlesUserParameter(bundleclasses.keySet(), bundleoutdir),
+				"-bundle", "opens.bundle-v1", "first-arg");
+		assertEquals(System.clearProperty(PROPERTY_NAME), "first-arg");
 	}
 
 }

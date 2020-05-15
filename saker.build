@@ -12,6 +12,7 @@ compile(
 	out main,
 	out action,
 	out testapicompile,
+	out jdk9util,
 	
 	in buildconfig = include(_configure)[buildconfig], 
 ) {
@@ -30,6 +31,7 @@ compile(
 		SourceDirectories: [
 			src,
 			json,
+			jdkutil/jdk8/
 		],
 		ClassPath: [
 			$testapicompile,
@@ -62,6 +64,14 @@ compile(
 			}
 		],
 		Identifier: "action{ $buildconfig[TestingId] }{ $buildconfig[ApiDocId] }",
+		CompilerOptions: $buildconfig[JavaCompilerOptions],
+	)
+	$jdk9util = saker.java.compile(
+		SourceDirectories: jdkutil/jdk9/,
+		Identifier: jdk9-util,
+		SDKs: {
+			Java: saker.java.sdk(9)
+		}
 		CompilerOptions: $buildconfig[JavaCompilerOptions],
 	)
 }
@@ -143,6 +153,16 @@ export(
 				Nest-Bundle-Source: "saker.nest-sources-v{ global(saker.nest.VERSION) }",
 			},
 		},
+		MultiReleaseContents: {
+			9: {
+				Resources: [
+					{
+						Directory: $compile[jdk9util][ClassDirectory],
+						Resources: saker/nest/**/*.class
+					}
+				]
+			}
+		}
 	)
 }
 exportall(
@@ -263,7 +283,9 @@ testexport(
 		},
 	)
 }
-test() {
+test(
+	in jre = saker.java.sdk(8),
+) {
 	$testexport = include(testexport)
 	$export = $testexport[export]
 	$compile = $export[compile]
@@ -315,6 +337,7 @@ test() {
 		MaxJVMCount: 1,
 		FailFast: true,
 		AbortOnFail: true,
+		JavaSDK: $jre,
 		Verbose: true,
 	)
 
@@ -360,11 +383,53 @@ test() {
 		MaxJVMCount: 1,
 		FailFast: true,
 		AbortOnFail: true,
+		JavaSDK: $jre,
 		Verbose: true,
 	)
 
 }
-
+testjava8(){
+	include(
+		test,
+		jre: saker.java.sdk(8),
+	)
+}
+testjava9(){
+	include(
+		test, 
+		jre: saker.java.sdk(9),
+	)
+}
+testjava10(){
+	include(
+		test, 
+		jre: saker.java.sdk(10),
+	)
+}
+testjava11(){
+	include(
+		test, 
+		jre: saker.java.sdk(11),
+	)
+}
+testjava12(){
+	include(
+		test, 
+		jre: saker.java.sdk(12),
+	)
+}
+testjava13(){
+	include(
+		test, 
+		jre: saker.java.sdk(13),
+	)
+}
+testjava14(){
+	include(
+		test, 
+		jre: saker.java.sdk(14),
+	)
+}
 
 _configure(
 	in testing = false,
@@ -393,6 +458,10 @@ _configure(
 						saker.apiextract.warn_doc: true,
 					},
 				},
+			},
+			{
+				SourceVersion: 8,
+				TargetVersion: 8,
 			}
 		],
 	}

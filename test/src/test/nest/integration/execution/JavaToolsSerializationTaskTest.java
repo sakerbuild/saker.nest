@@ -37,32 +37,27 @@ import testing.saker.build.tests.TestUtils;
 import testing.saker.nest.util.NestIntegrationTestUtils;
 
 @SakerTest
-public class ProviderInstantiateTaskTest extends CollectingMetricEnvironmentTestCase {
+public class JavaToolsSerializationTaskTest extends CollectingMetricEnvironmentTestCase {
 	//just a random uuid
-	private static final String PROPERTY_NAME = "2124844f-214b-45c6-a08f-196e511d9169";
-	private static final String PROVIDER_INSTANTIATE_PROPERTY = "e5e7f1e2-7793-4c56-8d7b-89b6ed13990d";
+	private static final String PROPERTY_NAME = "76fe4bbc-f0c8-43dc-b1e2-15b99fe1b189";
 
-	public static class SimpleTaskFactory {
-		public static SimpleTask provider() {
-			System.setProperty(PROVIDER_INSTANTIATE_PROPERTY, "true");
-			return new SimpleTask();
-		}
-	}
-
-	public static class SimpleTask implements TaskFactory<String>, ParameterizableTask<String>, Externalizable {
+	public static class SimpleTask implements TaskFactory<Object>, ParameterizableTask<Object>, Externalizable {
 		private static final long serialVersionUID = 1L;
 
 		public SimpleTask() {
 		}
 
+		@SuppressWarnings({ "unchecked", "rawtypes" })
 		@Override
-		public String run(TaskContext taskcontext) throws Exception {
+		public Object run(TaskContext taskcontext) throws Exception {
 			System.setProperty(PROPERTY_NAME, "hello");
-			return "hello";
+			return Enum.valueOf(
+					(Class) Class.forName("com.sun.source.tree.Tree$Kind", false, SimpleTask.class.getClassLoader()),
+					"CLASS");
 		}
 
 		@Override
-		public Task<? extends String> createTask(ExecutionContext executioncontext) {
+		public Task<? extends Object> createTask(ExecutionContext executioncontext) {
 			return this;
 		}
 
@@ -93,7 +88,8 @@ public class ProviderInstantiateTaskTest extends CollectingMetricEnvironmentTest
 		Path workdir = getWorkingDirectory();
 
 		TreeMap<String, Set<Class<?>>> bundleclasses = TestUtils.<String, Set<Class<?>>>treeMapBuilder()//
-				.put("simple.bundle-v1", ObjectUtils.newHashSet(SimpleTask.class, SimpleTaskFactory.class))//
+				.put("simple.bundle-v1", ObjectUtils.newHashSet(SimpleTask.class))//
+				.put("opens.bundle-v1", ObjectUtils.newHashSet(SimpleTask.class))//
 				.build();
 
 		parameters.setRepositoryConfiguration(NestExecutionTestUtils.createRepositoryConfiguration(testParameters));
@@ -106,13 +102,19 @@ public class ProviderInstantiateTaskTest extends CollectingMetricEnvironmentTest
 		NestIntegrationTestUtils.createAllJarsFromDirectoriesWithClasses(LocalFileProvider.getInstance(),
 				SakerPath.valueOf(workdir).resolve("bundles"), bundleoutdir, bundleclasses);
 
-		runScriptTask("build");
-
+		runScriptTask("simple");
 		assertEquals(System.clearProperty(PROPERTY_NAME), "hello");
-		assertEquals(System.clearProperty(PROVIDER_INSTANTIATE_PROPERTY), "true");
 
-		runScriptTask("build");
+		runScriptTask("simple");
 		assertEmpty(getMetric().getRunTaskIdFactories());
+		assertEquals(System.clearProperty(PROPERTY_NAME), null);
+
+		runScriptTask("opens");
+		assertEquals(System.clearProperty(PROPERTY_NAME), "hello");
+
+		runScriptTask("opens");
+		assertEmpty(getMetric().getRunTaskIdFactories());
+		assertEquals(System.clearProperty(PROPERTY_NAME), null);
 	}
 
 }

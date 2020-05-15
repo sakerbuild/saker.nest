@@ -291,8 +291,32 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	 * Requires the Java compiler related classes as the parent to the bundle class loader. <br>
 	 * On JDK8 this will mean that the <code>tools.jar</code> in the JDK will be loaded and used as parent. <br>
 	 * On later JDK version the platform class loader will be present as a parent class loader.
+	 * 
+	 * @see #SPECIAL_CLASSPATH_DEPENDENCY_JDK_COMPILER_OPEN
 	 */
 	public static final String SPECIAL_CLASSPATH_DEPENDENCY_JDK_TOOLS = "jdktools";
+
+	/**
+	 * Constant for the manifest attribute {@link #MANIFEST_NAME_CLASSPATH_SPECIAL_DEPENDENCY}.
+	 * <p>
+	 * Requires the Java compiler related classes as the parent to the bundle class loader. <br>
+	 * On JDK8 this works the same way as {@link #SPECIAL_CLASSPATH_DEPENDENCY_JDK_TOOLS}, it loads the
+	 * <code>tools.jar</code> for the classpath. <br>
+	 * On later JDK versions, the repository runtime will load the <code>jdk.compiler</code> module in a way that it
+	 * <b>opens</b> its packages to the bundle classloader. This means that the bundle classes will be able to access
+	 * non-exported classes and packages from the <code>jdk.compiler</code> module.
+	 * <p>
+	 * Special care should be taken as the <code>jdk.compiler</code> module is essentially reloaded by the repository
+	 * runtime. Its classes will be defined multiple times in the same JVM specifically for the repository operation.
+	 * Bundles that use this feature should perform testing on the JDK versions it's expected to run. You will not be
+	 * able to typecast object from the opened <code>jdk.compiler</code> module to types in the boot
+	 * <code>jdk.compiler</code>module.
+	 * <p>
+	 * If both this value and {@value #SPECIAL_CLASSPATH_DEPENDENCY_JDK_TOOLS} are specified, this takes precedence.
+	 *
+	 * @since saker.nest 0.8.5
+	 */
+	public static final String SPECIAL_CLASSPATH_DEPENDENCY_JDK_COMPILER_OPEN = "jdk.compiler-open";
 
 	/**
 	 * Dependency kind for specifying that the dependency is required to be on the classpath.
@@ -413,7 +437,8 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	public static final String DEPENDENCY_META_NATIVE_ARCHITECTURE = "native-architecture";
 
 	private static final Collection<String> ALLOWED_SPECIAL_CLASSPATH_DEPENDENCY_KINDS = ImmutableUtils
-			.makeImmutableNavigableSet(new String[] { SPECIAL_CLASSPATH_DEPENDENCY_JDK_TOOLS });
+			.makeImmutableNavigableSet(new String[] { SPECIAL_CLASSPATH_DEPENDENCY_JDK_TOOLS,
+					SPECIAL_CLASSPATH_DEPENDENCY_JDK_COMPILER_OPEN });
 
 	private static final Pattern PATTERN_COMMA_WHITESPACE_SPLIT = Pattern.compile("[, \\t]+");
 
@@ -768,6 +793,18 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	 */
 	public boolean isJdkToolsDependent() {
 		return specialClasspathDependencies.contains(SPECIAL_CLASSPATH_DEPENDENCY_JDK_TOOLS);
+	}
+
+	/**
+	 * Checks if this bundle requires the opened <code>jdk.compiler</code> module (or Java tools belov Java 9) on the
+	 * classpath.
+	 * 
+	 * @return <code>true</code> if the bundle requires the opened JDK compiler classes.
+	 * @see #MANIFEST_NAME_CLASSPATH_SPECIAL_DEPENDENCY
+	 * @see #SPECIAL_CLASSPATH_DEPENDENCY_JDK_COMPILER_OPEN
+	 */
+	public boolean isJdkCompilerOpenDependent() {
+		return specialClasspathDependencies.contains(SPECIAL_CLASSPATH_DEPENDENCY_JDK_COMPILER_OPEN);
 	}
 
 	/**

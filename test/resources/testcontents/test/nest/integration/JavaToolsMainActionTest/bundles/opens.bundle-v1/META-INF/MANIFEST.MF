@@ -1,0 +1,6 @@
+Manifest-Version: 1.0
+Nest-Bundle-Format-Version: 1
+Nest-Bundle-Identifier: opens.bundle-v1
+Nest-ClassPath-Special: jdk.compiler-open
+Main-Class: test.nest.integration.
+ JavaToolsMainActionTest$OpensMain
