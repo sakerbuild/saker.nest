@@ -32,6 +32,7 @@ import saker.build.thirdparty.saker.util.io.IOUtils;
 import saker.build.thirdparty.saker.util.io.JarFileUtils;
 import saker.build.thirdparty.saker.util.io.SerialUtils;
 import saker.nest.bundle.storage.AbstractBundleStorage;
+import saker.nest.exc.NestSignatureVerificationException;
 
 public class JarNestRepositoryBundleImpl extends AbstractNestRepositoryBundle implements JarNestRepositoryBundle {
 	public static final String BUNDLE_HASH_ALGORITHM = "MD5";
@@ -45,8 +46,21 @@ public class JarNestRepositoryBundleImpl extends AbstractNestRepositoryBundle im
 	private final LazySupplier<byte[]> jarHash = LazySupplier.of(this::computeJarHash);
 
 	public static JarNestRepositoryBundleImpl create(AbstractBundleStorage storage, Path bundlejar) throws IOException {
+		try {
+			return create(storage, bundlejar, null);
+		} catch (NestSignatureVerificationException e) {
+			//this shouldn't be thrown as verification is not perforemd
+			throw new AssertionError(e);
+		}
+	}
+
+	public static JarNestRepositoryBundleImpl create(AbstractBundleStorage storage, Path bundlejar,
+			ContentVerifier verifier) throws IOException, NestSignatureVerificationException {
 		SeekableByteChannel channel = BundleUtils.openExclusiveChannelForJar(bundlejar);
 		try {
+			if (verifier != null) {
+				verifier.verify(channel);
+			}
 			JarFile jarfile = JarFileUtils.createMultiReleaseJarFile(bundlejar);
 			try {
 				return new JarNestRepositoryBundleImpl(storage, jarfile, channel);

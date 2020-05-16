@@ -35,6 +35,7 @@ import saker.build.thirdparty.saker.util.io.IOUtils;
 import saker.build.thirdparty.saker.util.io.JarFileUtils;
 import saker.build.thirdparty.saker.util.io.SerialUtils;
 import saker.nest.exc.IllegalArchiveEntryNameException;
+import saker.nest.exc.NestSignatureVerificationException;
 
 public class JarExternalArchiveImpl extends AbstractExternalArchive implements JarExternalArchive {
 	private final SimpleExternalArchiveKey archiveKey;
@@ -53,9 +54,13 @@ public class JarExternalArchiveImpl extends AbstractExternalArchive implements J
 		this.entryNames = getEntryNamesValidate(jar);
 	}
 
-	public static JarExternalArchiveImpl create(SimpleExternalArchiveKey archiveKey, Path jarpath) throws IOException {
+	public static JarExternalArchiveImpl create(SimpleExternalArchiveKey archiveKey, Path jarpath,
+			ContentVerifier verifier) throws IOException, NestSignatureVerificationException {
 		SeekableByteChannel channel = BundleUtils.openExclusiveChannelForJar(jarpath);
 		try {
+			if (verifier != null) {
+				verifier.verify(channel);
+			}
 			JarFile jarfile = JarFileUtils.createMultiReleaseJarFile(jarpath);
 			try {
 				return new JarExternalArchiveImpl(archiveKey, channel, jarfile);

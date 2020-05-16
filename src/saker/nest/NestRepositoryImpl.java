@@ -76,6 +76,7 @@ import saker.nest.bundle.storage.AbstractBundleStorage;
 import saker.nest.bundle.storage.AbstractBundleStorageView;
 import saker.nest.bundle.storage.AbstractStorageKey;
 import saker.nest.exc.ExternalArchiveLoadingFailedException;
+import saker.nest.exc.NestSignatureVerificationException;
 import saker.nest.meta.Versions;
 import testing.saker.nest.TestFlag;
 
@@ -460,7 +461,12 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 							throw new ExternalArchiveLoadingFailedException(
 									"Failed to load external dependency: " + uri, e);
 						}
-						checkHashes(uri, urihash, extarchive);
+						try {
+							checkHashes(extarchive.hashes, urihash);
+						} catch (NestSignatureVerificationException e1) {
+							throw new ExternalArchiveLoadingFailedException(
+									"Failed to load external dependency: " + uri, e1);
+						}
 
 						if (mainincluded) {
 							int mainidx = deparchivecollector.reserveArchives(1);
@@ -540,7 +546,12 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 							throw new ExternalArchiveLoadingFailedException(
 									"Failed to load external attachment: " + attachmenturi, e);
 						}
-						checkHashes(attachmenturi, attachmenturihash, extarchive);
+						try {
+							checkHashes(extarchive.hashes, attachmenturihash);
+						} catch (NestSignatureVerificationException e1) {
+							throw new ExternalArchiveLoadingFailedException(
+									"Failed to load external attachment: " + attachmenturi, e1);
+						}
 
 						if (attachmentinfo.isIncludesMainArchive()) {
 							int mainidx = attachcollector.reserveArchives(1);
@@ -575,22 +586,6 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 							}
 						}
 					});
-		}
-	}
-
-	private static void checkHashes(URI uri, Hashes urihash, ExternalArchiveReference extarchive)
-			throws ExternalArchiveLoadingFailedException {
-		if (urihash.sha256 != null && !urihash.sha256.equals(extarchive.hashes.sha256)) {
-			throw new ExternalArchiveLoadingFailedException("Failed to load external dependency: " + uri
-					+ " (SHA-256 mismatch, expected: " + urihash.sha256 + " actual: " + extarchive.hashes.sha256 + ")");
-		}
-		if (urihash.sha1 != null && !urihash.sha1.equals(extarchive.hashes.sha1)) {
-			throw new ExternalArchiveLoadingFailedException("Failed to load external dependency: " + uri
-					+ " (SHA-1 mismatch, expected: " + urihash.sha1 + " actual: " + extarchive.hashes.sha1 + ")");
-		}
-		if (urihash.md5 != null && !urihash.md5.equals(extarchive.hashes.md5)) {
-			throw new ExternalArchiveLoadingFailedException("Failed to load external dependency: " + uri
-					+ " (MD5 mismatch, expected: " + urihash.md5 + " actual: " + extarchive.hashes.md5 + ")");
 		}
 	}
 
@@ -639,22 +634,37 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 	private ExternalArchiveReference loadExternalArchive(URI uri, Path archivepath, Hashes expectedhashes,
 			IOBiFunction<? super URI, ? super Hashes, ? extends InputStream> inputsupplier)
 			throws IOException, ExternalArchiveLoadingFailedException {
-		return loadExternalArchiveImpl(new SimpleExternalArchiveKey(uri), archivepath, expectedhashes, uri, () -> {
-			return inputsupplier.apply(uri, expectedhashes);
-		});
+		try {
+			return loadExternalArchiveImpl(new SimpleExternalArchiveKey(uri), archivepath, () -> expectedhashes, () -> {
+				return inputsupplier.apply(uri, expectedhashes);
+			});
+		} catch (NestSignatureVerificationException e) {
+			throw new ExternalArchiveLoadingFailedException("Failed to load external archive: " + uri, e);
+		}
 	}
 
 	private ExternalArchiveReference loadEmbeddedArchive(ExternalArchiveReference containingarchive, String ename,
 			Path entrypath, URI archiveuri) throws IOException, ExternalArchiveLoadingFailedException {
 
 		HashingInputStream[] hashingin = { null };
-		ExternalArchiveReference result = loadExternalArchiveImpl(
-				new SimpleExternalArchiveKey(containingarchive.archive.getArchiveKey().getUri(), ename), entrypath,
-				null, null, () -> {
-					InputStream entryis = containingarchive.archive.openEntry(ename);
-					hashingin[0] = new HashingInputStream(entryis);
-					return hashingin[0];
-				});
+		SimpleExternalArchiveKey archivekey = new SimpleExternalArchiveKey(
+				containingarchive.archive.getArchiveKey().getUri(), ename);
+		ExternalArchiveReference result;
+		try {
+			result = loadExternalArchiveImpl(archivekey, entrypath, () -> {
+				if (hashingin[0] == null) {
+					return containingarchive.getEntryHash(ename);
+				}
+				return hashingin[0].getHashes();
+			}, () -> {
+				InputStream entryis = containingarchive.archive.openEntry(ename);
+				hashingin[0] = new HashingInputStream(entryis);
+				return hashingin[0];
+			});
+		} catch (NestSignatureVerificationException e) {
+			throw new ExternalArchiveLoadingFailedException("Failed to load external archive entry: " + ename + " from "
+					+ archiveuri + " (at " + archiveuri + ")", e);
+		}
 		Hashes entryhash;
 		if (hashingin[0] != null) {
 			Hashes hashes = hashingin[0].getHashes();
@@ -675,36 +685,71 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 	}
 
 	private ExternalArchiveReference loadExternalArchiveImpl(SimpleExternalArchiveKey archivekey, Path archivepath,
-			Hashes expectedhashes, Object loadexceptioninfo, IOSupplier<InputStream> archiveinputsupplier)
-			throws IOException, ExternalArchiveLoadingFailedException {
+			IOSupplier<Hashes> expectedhashessupplier, IOSupplier<? extends InputStream> archiveinputsupplier)
+			throws IOException, NestSignatureVerificationException {
 		ExternalArchiveReference extarchive;
 		synchronized (externalArchiveLoadLocks.computeIfAbsent(archivepath, Functionals.objectComputer())) {
 			extarchive = externalArchives.get(archivepath);
 			if (extarchive != null) {
 				return extarchive;
 			}
-			Hashes loadhashes = loadExternalArchiveFromInputImpl(archivepath, expectedhashes, loadexceptioninfo,
-					archiveinputsupplier);
-			JarExternalArchiveImpl jararchive = JarExternalArchiveImpl.create(archivekey, archivepath);
-			extarchive = createArchiveReference(jararchive);
-			if (loadhashes != null && !loadhashes.equals(extarchive.hashes)) {
-				IOException e = new IOException(
-						"Hash mismatch. External archive was concurrently modified: " + archivepath);
-				IOUtils.closeExc(e, jararchive);
+			JarExternalArchiveImpl jararchive;
+			Hashes[] loadhashes = { null };
+			loadhashes[0] = loadExternalArchiveFromInputImpl(archivepath, archiveinputsupplier);
+			jararchive = JarExternalArchiveImpl.create(archivekey, archivepath, channel -> {
+				Hashes verifyhashes = getHashesFromChannel(channel);
+				if (loadhashes[0] != null && !loadhashes[0].equals(verifyhashes)) {
+					throw new NestSignatureVerificationException(
+							"External archive signature mismatch between loading and opening: " + archivepath);
+				}
+				if (expectedhashessupplier != null) {
+					Hashes expectedhashes = expectedhashessupplier.get();
+					if (expectedhashes != null) {
+						checkHashes(verifyhashes, expectedhashes);
+					}
+				}
+				loadhashes[0] = verifyhashes;
+			});
+			try {
+				extarchive = new ExternalArchiveReference(jararchive, loadhashes[0]);
+				for (String ename : jararchive.getEntryNames()) {
+					//validate entries
+					BundleUtils.checkArchiveEntryName(ename);
+				}
+			} catch (Throwable e) {
+				IOUtils.addExc(e, IOUtils.closeExc(extarchive.archive));
 				throw e;
-			}
-			for (String ename : jararchive.getEntryNames()) {
-				//validate entries
-				BundleUtils.checkArchiveEntryName(ename);
 			}
 			externalArchives.put(archivepath, extarchive);
 		}
 		return extarchive;
 	}
 
-	private static Hashes loadExternalArchiveFromInputImpl(Path archivepath, Hashes expectedhashes,
-			Object loadexceptioninfo, IOSupplier<InputStream> archiveinputsupplier)
-			throws IOException, ExternalArchiveLoadingFailedException {
+	private static Hashes getHashesFromChannel(SeekableByteChannel channel) throws AssertionError, IOException {
+		MessageDigest sha1;
+		MessageDigest sha256;
+		MessageDigest md5;
+		try {
+			md5 = MessageDigest.getInstance("MD5");
+			sha256 = MessageDigest.getInstance("SHA-256");
+			sha1 = MessageDigest.getInstance("SHA-1");
+		} catch (NoSuchAlgorithmException e) {
+			throw new AssertionError("Failed to retrieve hashing algorithm.", e);
+		}
+		InputStream in = Channels.newInputStream(channel);
+		byte[] buffer = new byte[StreamUtils.DEFAULT_BUFFER_SIZE];
+		for (int read; (read = in.read(buffer)) > 0;) {
+			sha256.update(buffer, 0, read);
+			sha1.update(buffer, 0, read);
+			md5.update(buffer, 0, read);
+		}
+		Hashes verifyhashes = new Hashes(StringUtils.toHexString(sha256.digest()),
+				StringUtils.toHexString(sha1.digest()), StringUtils.toHexString(md5.digest()));
+		return verifyhashes;
+	}
+
+	private static Hashes loadExternalArchiveFromInputImpl(Path archivepath,
+			IOSupplier<? extends InputStream> archiveinputsupplier) throws IOException {
 		Hashes loadhashes = null;
 		Path tempfile = archivepath.resolveSibling(UUID.randomUUID() + ".temp");
 		try {
@@ -724,23 +769,6 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 							}
 						}
 					}
-					if (expectedhashes != null) {
-						if (expectedhashes.sha256 != null && !expectedhashes.sha256.equals(loadhashes.sha256)) {
-							throw new ExternalArchiveLoadingFailedException(
-									"External archive load hash mismatch: " + loadexceptioninfo + " (SHA-256 expected: "
-											+ expectedhashes.sha256 + " actual: " + loadhashes.sha256 + ")");
-						}
-						if (expectedhashes.sha1 != null && !expectedhashes.sha1.equals(loadhashes.sha1)) {
-							throw new ExternalArchiveLoadingFailedException(
-									"External archive load hash mismatch: " + loadexceptioninfo + " (SHA-1 expected: "
-											+ expectedhashes.sha1 + " actual: " + loadhashes.sha1 + ")");
-						}
-						if (expectedhashes.md5 != null && !expectedhashes.md5.equals(loadhashes.md5)) {
-							throw new ExternalArchiveLoadingFailedException(
-									"External archive load hash mismatch: " + loadexceptioninfo + " (MD5 expected: "
-											+ expectedhashes.md5 + " actual: " + loadhashes.md5 + ")");
-						}
-					}
 					try {
 						Files.move(tempfile, archivepath);
 					} catch (IOException e) {
@@ -757,31 +785,20 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 		return loadhashes;
 	}
 
-	private static ExternalArchiveReference createArchiveReference(JarExternalArchiveImpl archive) throws IOException {
-		SeekableByteChannel channel = archive.getChannel();
-		MessageDigest sha1;
-		MessageDigest sha256;
-		MessageDigest md5;
-		try {
-			md5 = MessageDigest.getInstance("MD5");
-			sha256 = MessageDigest.getInstance("SHA-256");
-			sha1 = MessageDigest.getInstance("SHA-1");
-		} catch (NoSuchAlgorithmException e) {
-			throw new AssertionError("Failed to retrieve hashing algorithm.", e);
+	private static void checkHashes(Hashes loadhashes, Hashes expectedhashes)
+			throws NestSignatureVerificationException {
+		if (expectedhashes.sha256 != null && !expectedhashes.sha256.equals(loadhashes.sha256)) {
+			throw new NestSignatureVerificationException("Hash mismatch:  (SHA-256 expected: " + expectedhashes.sha256
+					+ " actual: " + loadhashes.sha256 + ")");
 		}
-		synchronized (channel) {
-			channel.position(0);
-			InputStream in = Channels.newInputStream(channel);
-			byte[] buffer = new byte[StreamUtils.DEFAULT_BUFFER_SIZE];
-			for (int read; (read = in.read(buffer)) > 0;) {
-				sha256.update(buffer, 0, read);
-				sha1.update(buffer, 0, read);
-				md5.update(buffer, 0, read);
-			}
+		if (expectedhashes.sha1 != null && !expectedhashes.sha1.equals(loadhashes.sha1)) {
+			throw new NestSignatureVerificationException(
+					"Hash mismatch: (SHA-1 expected: " + expectedhashes.sha1 + " actual: " + loadhashes.sha1 + ")");
 		}
-		Hashes hashes = new Hashes(StringUtils.toHexString(sha256.digest()), StringUtils.toHexString(sha1.digest()),
-				StringUtils.toHexString(md5.digest()));
-		return new ExternalArchiveReference(archive, hashes);
+		if (expectedhashes.md5 != null && !expectedhashes.md5.equals(loadhashes.md5)) {
+			throw new NestSignatureVerificationException(
+					"Hash mismatch: (MD5 expected: " + expectedhashes.md5 + " actual: " + loadhashes.md5 + ")");
+		}
 	}
 
 	public static class ExternalArchiveReference {

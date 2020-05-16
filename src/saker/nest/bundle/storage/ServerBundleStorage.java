@@ -93,6 +93,7 @@ import saker.nest.bundle.AbstractNestRepositoryBundle;
 import saker.nest.bundle.BundleIdentifier;
 import saker.nest.bundle.BundleInformation;
 import saker.nest.bundle.BundleUtils;
+import saker.nest.bundle.ContentVerifier;
 import saker.nest.bundle.ExternalArchive;
 import saker.nest.bundle.ExternalArchiveKey;
 import saker.nest.bundle.ExternalDependencyInformation;
@@ -102,6 +103,7 @@ import saker.nest.bundle.NestRepositoryBundle;
 import saker.nest.exc.BundleLoadingFailedException;
 import saker.nest.exc.ExternalArchiveLoadingFailedException;
 import saker.nest.exc.InvalidNestBundleException;
+import saker.nest.exc.NestSignatureVerificationException;
 import saker.nest.exc.OfflineStorageIOException;
 import saker.nest.thirdparty.org.json.JSONArray;
 import saker.nest.thirdparty.org.json.JSONException;
@@ -273,12 +275,16 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 
 	}
 
-	private class LoadedBundleState implements Closeable {
+	private final class LoadedBundleState implements Closeable {
 		protected final JarNestRepositoryBundleImpl bundle;
 		protected final Map<BundleSignatureVerificationConfiguration, VerificationState> verifiedSignatures = new ConcurrentHashMap<>();
 
-		public LoadedBundleState(JarNestRepositoryBundleImpl bundle) {
-			this.bundle = bundle;
+		public LoadedBundleState(BundleIdentifier bundleid, BundleSignatureHolder signatureholder, Path bundlepath,
+				BundleSignatureVerificationConfiguration verifyconfig, boolean offline)
+				throws IOException, BundleLoadingFailedException {
+			bundle = createBundle(bundleid, bundlepath, channel -> {
+				verifyBundleWithConfigImpl(verifyconfig, signatureholder, offline, bundleid, channel, bundlepath);
+			});
 		}
 
 		@Override
@@ -287,22 +293,34 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 			bundle.close();
 		}
 
-		public JarNestRepositoryBundleImpl getBundleVerify(BundleSignatureVerificationConfiguration verifyconfig,
-				boolean offline) throws BundleLoadingFailedException {
+		public void verifyBundleWithConfig(BundleSignatureVerificationConfiguration verifyconfig, boolean offline)
+				throws NestSignatureVerificationException {
+			verifyBundleWithConfig(verifyconfig, null, offline);
+		}
+
+		public void verifyBundleWithConfig(BundleSignatureVerificationConfiguration verifyconfig,
+				BundleSignatureHolder signatureholder, boolean offline) throws NestSignatureVerificationException {
+			verifyBundleWithConfigImpl(verifyconfig, signatureholder, offline, bundle.getBundleIdentifier(), null,
+					bundle.getJarPath());
+		}
+
+		private void verifyBundleWithConfigImpl(BundleSignatureVerificationConfiguration verifyconfig,
+				BundleSignatureHolder signatureholder, boolean offline, BundleIdentifier bundleid,
+				SeekableByteChannel channel, Path bundlepath) throws NestSignatureVerificationException {
 			if (verifyconfig.canLoadWithoutSignature()) {
-				return bundle;
+				return;
 			}
 			VerificationState nstate = new VerificationState(VERIFICATION_STATE_VERIFYING, offline);
 			synchronized (nstate) {
 				VerificationState prevverifstate = verifiedSignatures.putIfAbsent(verifyconfig, nstate);
 				if (TestFlag.ENABLED) {
-					if (!TestFlag.metric().allowCachedVerificationState(bundle.getBundleIdentifier().toString())) {
+					if (!TestFlag.metric().allowCachedVerificationState(bundleid.toString())) {
 						prevverifstate = null;
 					}
 				}
 				if (prevverifstate != null) {
 					if (prevverifstate == SIGNATURE_VERIFIED) {
-						return bundle;
+						return;
 					}
 					if (prevverifstate.state == VERIFICATION_STATE_VERIFYING) {
 						synchronized (prevverifstate) {
@@ -312,96 +330,69 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 					}
 					if (prevverifstate.state == VERIFICATION_STATE_FAILED) {
 						if (offline || !prevverifstate.offline) {
-							throw new BundleLoadingFailedException("Failed to verify bundle.",
+							throw new NestSignatureVerificationException("Failed to verify bundle.",
 									prevverifstate.verificationFailCause);
 						}
 						//don't throw and try to verify again if we can do the verification online
 					}
 				}
-				Path signaturefilepath = getBundleSignaturePathFromBundlePath(bundle.getJarPath());
-				BundleSignatureHolder signatureholder = BundleSignatureHolder.fromFile(signaturefilepath);
+				Path signaturefilepath = getBundleSignaturePathFromBundlePath(bundlepath);
+				if (signatureholder == null) {
+					signatureholder = BundleSignatureHolder.fromFile(signaturefilepath);
+				}
+				BundleSignatureHolder downloadedsignature = null;
 				if (signatureholder == null || signatureholder.getVersion() < verifyconfig.getMinSignatureVersion()) {
-					if (!offline) {
-						BundleSignatureHolder downloadedsignature = null;
-						try {
-							downloadedsignature = downloadBundleSignature(bundle.getBundleIdentifier(), offline);
-						} catch (IOException e) {
-							verifiedSignatures.put(verifyconfig, new VerificationState(e, offline));
-							throw new BundleLoadingFailedException("Failed to verify bundle.", e);
-						}
-						try {
-							verifyBundleSignature(bundle, verifyconfig, downloadedsignature, offline);
-						} catch (Throwable e) {
-							verifiedSignatures.put(verifyconfig, new VerificationState(e, offline));
-							throw e;
-						}
-						if (downloadedsignature != null) {
-							try {
-								downloadedsignature.writeTo(signaturefilepath);
-							} catch (IOException e) {
-								//ignoreable, as the bundle is alerady verified
-							}
-						}
-						return bundle;
+					if (offline) {
+						NestSignatureVerificationException exc = new NestSignatureVerificationException(
+								"Failed to verify bundle, cannot download latest signature in offline mode for: "
+										+ bundleid,
+								new OfflineStorageIOException());
+						verifiedSignatures.put(verifyconfig, new VerificationState(exc, offline));
+						throw exc;
 					}
-					BundleLoadingFailedException exc = new BundleLoadingFailedException(
-							"Failed to verify bundle, missing or invalid signature version for: "
-									+ bundle.getBundleIdentifier(),
-							new OfflineStorageIOException());
+					try {
+						signatureholder = downloadBundleSignature(bundleid, offline);
+						downloadedsignature = signatureholder;
+					} catch (IOException e) {
+						verifiedSignatures.put(verifyconfig, new VerificationState(e, offline));
+						throw new NestSignatureVerificationException("Failed to verify bundle.", e);
+					}
+				}
+				if (signatureholder == null) {
+					NestSignatureVerificationException exc = new NestSignatureVerificationException(
+							"Failed to verify bundle, missing signature for: " + bundleid);
+					verifiedSignatures.put(verifyconfig, new VerificationState(exc, offline));
+					throw exc;
+				}
+				if (signatureholder.getVersion() < verifyconfig.getMinSignatureVersion()) {
+					NestSignatureVerificationException exc = new NestSignatureVerificationException(
+							"Failed to verify bundle, invalid signature version for: " + bundleid);
 					verifiedSignatures.put(verifyconfig, new VerificationState(exc, offline));
 					throw exc;
 				}
 				try {
-					verifyBundleSignature(bundle, verifyconfig, signatureholder, offline);
+					if (channel == null) {
+						channel = bundle.getChannel();
+						synchronized (bundleid) {
+							verifyBundleSignature(channel, bundleid, verifyconfig, signatureholder, offline);
+						}
+					} else {
+						verifyBundleSignature(channel, bundleid, verifyconfig, signatureholder, offline);
+					}
 					verifiedSignatures.put(verifyconfig, SIGNATURE_VERIFIED);
 				} catch (Throwable e) {
 					verifiedSignatures.put(verifyconfig, new VerificationState(e, offline));
 					throw e;
 				}
-				return bundle;
-			}
-		}
-
-		public AbstractNestRepositoryBundle getBundleVerify(BundleSignatureVerificationConfiguration verifyconfig,
-				BundleSignatureHolder signature, boolean offline) throws BundleLoadingFailedException {
-			if (verifyconfig.canLoadWithoutSignature()) {
-				return bundle;
-			}
-			VerificationState nstate = new VerificationState(VERIFICATION_STATE_VERIFYING, offline);
-			synchronized (nstate) {
-				VerificationState prevverifstate = verifiedSignatures.putIfAbsent(verifyconfig, nstate);
-				if (TestFlag.ENABLED) {
-					if (!TestFlag.metric().allowCachedVerificationState(bundle.getBundleIdentifier().toString())) {
-						prevverifstate = null;
+				if (downloadedsignature != null) {
+					try {
+						downloadedsignature.writeTo(signaturefilepath);
+					} catch (IOException e) {
+						//ignoreable, as the bundle is alerady verified
 					}
 				}
-				if (prevverifstate != null) {
-					if (prevverifstate == SIGNATURE_VERIFIED) {
-						return bundle;
-					}
-					if (prevverifstate.state == VERIFICATION_STATE_VERIFYING) {
-						synchronized (prevverifstate) {
-							//sync to wait the compiletion
-						}
-						prevverifstate = verifiedSignatures.get(verifyconfig);
-					}
-					if (prevverifstate.state == VERIFICATION_STATE_FAILED) {
-						if (offline || !prevverifstate.offline) {
-							throw new BundleLoadingFailedException("Failed to verify bundle.",
-									prevverifstate.verificationFailCause);
-						}
-						//don't throw and try to verify again if we can do the verification online
-					}
-				}
-				try {
-					verifyBundleSignature(bundle, verifyconfig, signature, offline);
-					verifiedSignatures.put(verifyconfig, SIGNATURE_VERIFIED);
-				} catch (Throwable e) {
-					verifiedSignatures.put(verifyconfig, new VerificationState(e, offline));
-					throw e;
-				}
+				return;
 			}
-			return bundle;
 		}
 
 	}
@@ -834,26 +825,24 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 
 	}
 
-	private void verifyBundleSignature(JarNestRepositoryBundleImpl bundle,
+	private void verifyBundleSignature(SeekableByteChannel channel, BundleIdentifier bundleid,
 			BundleSignatureVerificationConfiguration verificationconfiguration, BundleSignatureHolder signatureholder,
-			boolean offline) throws BundleLoadingFailedException {
+			boolean offline) throws NestSignatureVerificationException {
 		if (verificationconfiguration.canLoadWithoutSignature()) {
 			//no need to verify
 			return;
 		}
 		if (signatureholder == null) {
-			throw new BundleLoadingFailedException(
-					"Failed to verify, missing bundle signature: " + bundle.getBundleIdentifier());
+			throw new NestSignatureVerificationException("Failed to verify, missing bundle signature: " + bundleid);
 		}
 		if (signatureholder.getVersion() < verificationconfiguration.getMinSignatureVersion()) {
-			throw new BundleLoadingFailedException("Failed to verify, unaccepted bundle signature version: "
-					+ bundle.getBundleIdentifier() + " with " + signatureholder.getVersion() + " minimum: "
+			throw new NestSignatureVerificationException("Failed to verify, unaccepted bundle signature version: "
+					+ bundleid + " with " + signatureholder.getVersion() + " minimum: "
 					+ verificationconfiguration.getMinSignatureVersion());
 		}
-		SeekableByteChannel channel = bundle.getChannel();
 		if (channel == null) {
-			throw new BundleLoadingFailedException(
-					"Failed to verify bundle: " + bundle.getBundleIdentifier() + ", no file channel available.");
+			throw new NestSignatureVerificationException(
+					"Failed to verify bundle: " + bundleid + ", no file channel available.");
 		}
 		try {
 			Signature signature;
@@ -861,27 +850,21 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 			PublicKey signaturekey = getBundleSignatureKey(signatureholder.version, offline);
 			if (signaturekey == null) {
 				throw new BundleLoadingFailedException(
-						"Failed to verify bundle signature, missing public key: " + bundle.getBundleIdentifier());
+						"Failed to verify bundle signature, missing public key: " + bundleid);
 			}
-			synchronized (bundle) {
-				channel.position(0);
-				//don't close the created input stream, as that would close the channel
-				InputStream in = Channels.newInputStream(channel);
-				signature = Signature.getInstance(BUNDLE_SIGNATURE_ALGORITHM);
-				signature.initVerify(signaturekey);
-				StreamUtils.copyStream(in, signature);
-			}
+			channel.position(0);
+			//don't close the created input stream, as that would close the channel
+			InputStream in = Channels.newInputStream(channel);
+			signature = Signature.getInstance(BUNDLE_SIGNATURE_ALGORITHM);
+			signature.initVerify(signaturekey);
+			StreamUtils.copyStream(in, signature);
 			boolean verified = signature.verify(signatureholder.signatureBytes);
 			if (!verified) {
-				throw new BundleLoadingFailedException(
-						"Failed to verify, invalid bundle signature: " + bundle.getBundleIdentifier());
+				throw new BundleLoadingFailedException("Failed to verify, invalid bundle signature: " + bundleid);
 			}
 			return;
-		} catch (BundleLoadingFailedException e) {
-			throw e;
 		} catch (Exception e) {
-			throw new BundleLoadingFailedException("Failed to verify bundle signature: " + bundle.getBundleIdentifier(),
-					e);
+			throw new NestSignatureVerificationException("Failed to verify bundle signature: " + bundleid, e);
 		}
 	}
 
@@ -891,19 +874,20 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		//don't follow redirects
 		return makeServerRequest((offline ? FLAG_REQUEST_OFFLINE : 0), requesturl, "HEAD",
 				(url, rc, ins, errs, headerfunc) -> {
-					if (rc == HttpURLConnection.HTTP_OK) {
-						//HTTP OK
-						return getSignatureFromHeaders(headerfunc);
+					BundleSignatureHolder sig = getSignatureFromHeaders(headerfunc);
+					if (sig != null) {
+						return sig;
 					}
+					//XXX maybe handle redirect
 					return null;
 				});
 	}
 
 	private static class DownloadedBundle {
-		protected JarNestRepositoryBundleImpl bundle;
+		protected Path bundle;
 		protected BundleSignatureHolder signature;
 
-		public DownloadedBundle(JarNestRepositoryBundleImpl bundle, BundleSignatureHolder signature) {
+		public DownloadedBundle(Path bundle, BundleSignatureHolder signature) {
 			this.bundle = bundle;
 			this.signature = signature;
 		}
@@ -964,40 +948,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 								// and opens it without allowing us to overwrite
 								//we can continue execution, as we verify the contents of the JAR before opening it
 							}
-							try {
-								JarNestRepositoryBundleImpl result = createBundle(resultjarpath);
-
-								try {
-									if (!bundleid.equals(result.getBundleIdentifier())) {
-										throw ObjectUtils.sneakyThrow(new BundleLoadingFailedException(
-												"Downloaded bundle identifier mismatch: " + result.getBundleIdentifier()
-														+ " with expected: " + bundleid));
-									}
-									if (signatureHolder != null) {
-										try {
-											signatureHolder
-													.writeTo(getBundleSignaturePathFromBundlePath(resultjarpath));
-										} catch (IOException e) {
-											//ignore
-										}
-									}
-									return new DownloadedBundle(result, signatureHolder);
-								} catch (Throwable e) {
-									IOUtils.addExc(e, IOUtils.closeExc(result));
-									throw e;
-								}
-							} catch (IOException e) {
-								//failed to open the jar
-								//this should not happen, only if the downloaded bundle is corrupted
-								//expect the next download to be corrupted too.
-								//the build will probably fail so the use is notified about the failure, and an environment restart can solve this
-								throw ObjectUtils.sneakyThrow(
-										new BundleLoadingFailedException("Failed to download bundle: " + bundleid, e));
-							} catch (InvalidNestBundleException e) {
-								//shouldn't really happen as downloaded bundles should be valid, but handle nonetheless
-								throw ObjectUtils.sneakyThrow(new BundleLoadingFailedException(
-										"Failed to load downloaded bundle: " + bundleid, e));
-							}
+							return new DownloadedBundle(resultjarpath, signatureHolder);
 						} finally {
 							try {
 								Files.deleteIfExists(tempfilepath);
@@ -1039,16 +990,22 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		return result;
 	}
 
-	private JarNestRepositoryBundleImpl createBundle(Path resultjarpath) throws IOException {
+	private JarNestRepositoryBundleImpl createBundle(BundleIdentifier bundleid, Path resultjarpath,
+			ContentVerifier verifier) throws IOException, BundleLoadingFailedException {
 		//require that all external dependencies have sha-256 defined for them
 
-		JarNestRepositoryBundleImpl result = JarNestRepositoryBundleImpl.create(this, resultjarpath);
+		JarNestRepositoryBundleImpl result;
+		try {
+			result = JarNestRepositoryBundleImpl.create(this, resultjarpath, verifier);
+		} catch (NestSignatureVerificationException e) {
+			throw new BundleLoadingFailedException("Failed to load bundle: " + bundleid, e);
+		}
 		try {
 			BundleInformation info = result.getInformation();
 			ExternalDependencyInformation extdeps = info.getExternalDependencyInformation();
 			for (Entry<URI, Hashes> entry : BundleUtils.getExternalDependencyInformationHashes(extdeps).entrySet()) {
 				if (entry.getValue().sha256 == null) {
-					throw new InvalidNestBundleException("Bundle " + info.getBundleIdentifier()
+					throw new BundleLoadingFailedException("Bundle " + info.getBundleIdentifier()
 							+ " declares external dependency without SHA-256 hash value: " + entry.getKey());
 				}
 			}
@@ -2068,49 +2025,58 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 			if (bundleid.getVersionQualifier() == null) {
 				throw new BundleLoadingFailedException("Failed to load bundle without version qualifier: " + bundleid);
 			}
-			LoadedBundleState got = loadedBundles.get(bundleid);
-			if (got != null) {
-				return got.getBundleVerify(signatureVerificationConfiguration, offline);
-			}
-			synchronized (bundleLoadLocks.computeIfAbsent(bundleid, Functionals.objectComputer())) {
-				got = loadedBundles.get(bundleid);
+			try {
+				LoadedBundleState got = loadedBundles.get(bundleid);
 				if (got != null) {
-					return got.getBundleVerify(signatureVerificationConfiguration, offline);
+					got.verifyBundleWithConfig(signatureVerificationConfiguration, offline);
+					return got.bundle;
 				}
-				if (closed) {
-					throw new BundleLoadingFailedException("Storage closed.");
-				}
-				//load the bundle ourselves
-				Path bundlejarpath = BundleUtils.getVersionedBundleJarPath(bundlesDirectory, bundleid);
-				if (Files.isRegularFile(bundlejarpath)) {
-					try {
-						JarNestRepositoryBundleImpl created = createBundle(bundlejarpath);
+				synchronized (bundleLoadLocks.computeIfAbsent(bundleid, Functionals.objectComputer())) {
+					got = loadedBundles.get(bundleid);
+					if (got != null) {
+						got.verifyBundleWithConfig(signatureVerificationConfiguration, offline);
+						return got.bundle;
+					}
+					if (closed) {
+						throw new BundleLoadingFailedException("Storage closed.");
+					}
+					//load the bundle ourselves
+					Path bundlejarpath = BundleUtils.getVersionedBundleJarPath(bundlesDirectory, bundleid);
+					if (Files.isRegularFile(bundlejarpath)) {
 						try {
-							if (!bundleid.equals(created.getBundleIdentifier())) {
-								throw new BundleLoadingFailedException("Bundle identifier mismatch: "
-										+ created.getBundleIdentifier() + " with expected: " + bundleid);
-							}
-							got = new LoadedBundleState(created);
+							got = new LoadedBundleState(bundleid, null, bundlejarpath,
+									signatureVerificationConfiguration, offline);
 							loadedBundles.put(bundleid, got);
-						} catch (Throwable e) {
-							IOUtils.addExc(e, IOUtils.closeExc(created));
-							throw e;
+							if (!bundleid.equals(got.bundle.getBundleIdentifier())) {
+								throw new BundleLoadingFailedException("Bundle identifier mismatch: "
+										+ got.bundle.getBundleIdentifier() + " with expected: " + bundleid);
+							}
+							got.verifyBundleWithConfig(signatureVerificationConfiguration, offline);
+							return got.bundle;
+						} catch (IOException e) {
+							//XXX tell that deleting it might help
+							throw new BundleLoadingFailedException(
+									"Failed to load bundle: " + bundleid + " from storage: " + bundlejarpath, e);
+						} catch (InvalidNestBundleException e) {
+							throw new BundleLoadingFailedException(
+									"Failed to load bundle: " + bundleid + " from storage: " + bundlejarpath, e);
 						}
-						return got.getBundleVerify(signatureVerificationConfiguration, offline);
+					}
+					//download the bundle
+					DownloadedBundle downloadres = downloadBundle(bundleid, bundlejarpath, offline);
+					try {
+						got = new LoadedBundleState(bundleid, null, downloadres.bundle,
+								signatureVerificationConfiguration, offline);
 					} catch (IOException e) {
-						//XXX tell that deleting it might help
-						throw new BundleLoadingFailedException(
-								"Failed to load bundle: " + bundleid + " from storage: " + bundlejarpath, e);
-					} catch (InvalidNestBundleException e) {
 						throw new BundleLoadingFailedException(
 								"Failed to load bundle: " + bundleid + " from storage: " + bundlejarpath, e);
 					}
+					loadedBundles.put(bundleid, got);
+					got.verifyBundleWithConfig(signatureVerificationConfiguration, downloadres.signature, offline);
+					return got.bundle;
 				}
-				//download the bundle
-				DownloadedBundle downloadres = downloadBundle(bundleid, bundlejarpath, offline);
-				got = new LoadedBundleState(downloadres.bundle);
-				loadedBundles.put(bundleid, got);
-				return got.getBundleVerify(signatureVerificationConfiguration, downloadres.signature, offline);
+			} catch (NestSignatureVerificationException e) {
+				throw new BundleLoadingFailedException("Failed to load bundle: " + bundleid, e);
 			}
 		}
 

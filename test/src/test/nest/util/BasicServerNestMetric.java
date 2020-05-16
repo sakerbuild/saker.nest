@@ -40,6 +40,8 @@ public class BasicServerNestMetric implements NestMetric {
 
 	@Override
 	public PublicKey overrideServerBundleSignaturePublicKey(String server, int version) {
+		System.out
+				.println("BasicServerNestMetric.overrideServerBundleSignaturePublicKey() " + server + " - " + version);
 		if ("https://testurl".equals(server) && version == bundleSigningVersion) {
 			return bundleSigningKeyPair.getPublic();
 		}
@@ -48,6 +50,7 @@ public class BasicServerNestMetric implements NestMetric {
 
 	@Override
 	public Integer getServerRequestResponseCode(String requesturl) throws IOException {
+		System.out.println("BasicServerNestMetric.getServerRequestResponseCode() " + requesturl);
 		if (("https://testurl/bundle_signature_key/" + bundleSigningVersion).equals(requesturl)) {
 			return HttpURLConnection.HTTP_OK;
 		}
@@ -56,6 +59,7 @@ public class BasicServerNestMetric implements NestMetric {
 
 	@Override
 	public InputStream getServerRequestResponseStream(String requesturl) throws IOException {
+		System.out.println("BasicServerNestMetric.getServerRequestResponseStream() " + requesturl);
 		if (("https://testurl/bundle_signature_key/" + bundleSigningVersion).equals(requesturl)) {
 			return new UnsyncByteArrayInputStream(bundleSigningKeyPair.getPublic().getEncoded());
 		}
@@ -90,6 +94,7 @@ public class BasicServerNestMetric implements NestMetric {
 
 	@Override
 	public Map<String, String> getServerRequestResponseHeaders(String requesturl) {
+		System.out.println("BasicServerNestMetric.getServerRequestResponseHeaders() " + requesturl);
 		Map<String, String> result = new TreeMap<>();
 		applyBundleDownloadSignatureResponseHeaders(requesturl, result);
 		return result;

@@ -212,7 +212,8 @@ public class ParameterBundleStorage extends AbstractBundleStorage {
 		return new ParameterBundleStorageViewImpl(userparameters, pathconfig);
 	}
 
-	private JarNestRepositoryBundleImpl getLoadBundle(Path jp) throws IOException, InvalidNestBundleException {
+	private JarNestRepositoryBundleImpl getLoadBundle(Path jp)
+			throws IOException, InvalidNestBundleException, BundleLoadingFailedException {
 		JarNestRepositoryBundleImpl got = loadedBundles.get(jp);
 		if (got != null) {
 			return got;
