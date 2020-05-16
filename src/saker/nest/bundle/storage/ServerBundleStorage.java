@@ -894,8 +894,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 				(url, rc, ins, errs, headerfunc) -> {
 					if (rc == HttpURLConnection.HTTP_OK) {
 						//HTTP OK
-						return BundleSignatureHolder.fromHeaders(headerfunc.apply("Nest-Bundle-Signature"),
-								headerfunc.apply("Nest-Bundle-Signature-Version"));
+						return getSignatureFromHeaders(headerfunc);
 					}
 					return null;
 				});
@@ -927,12 +926,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 					if (rc >= 300 && rc < 400) {
 						//redirection
 						if (signatureHolder == null) {
-							BundleSignatureHolder currentsig = BundleSignatureHolder.fromHeaders(
-									headerfunc.apply("Nest-Bundle-Signature"),
-									headerfunc.apply("Nest-Bundle-Signature-Version"));
-							if (currentsig != null) {
-								signatureHolder = currentsig;
-							}
+							signatureHolder = getSignatureFromHeaders(headerfunc);
 						}
 						String location = headerfunc.apply("Location");
 						if (location == null) {
@@ -949,12 +943,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 						//persist to a temporary file, then move that file to the target
 
 						if (signatureHolder == null) {
-							BundleSignatureHolder currentsig = BundleSignatureHolder.fromHeaders(
-									headerfunc.apply("Nest-Bundle-Signature"),
-									headerfunc.apply("Nest-Bundle-Signature-Version"));
-							if (currentsig != null) {
-								signatureHolder = currentsig;
-							}
+							signatureHolder = getSignatureFromHeaders(headerfunc);
 						}
 
 						byte[] randbytes = new byte[8];
@@ -1031,10 +1020,24 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 											+ " with HTTP response code: " + rc + " with error payload: " + errstr),
 									errexc));
 				}
+
 			});
 		} catch (IOException e) {
 			throw new BundleLoadingFailedException("Failed to download bundle: " + bundleid, e);
 		}
+	}
+
+	protected static BundleSignatureHolder getSignatureFromHeaders(
+			Function<? super String, ? extends String> headerfunc) {
+		BundleSignatureHolder result = BundleSignatureHolder.fromHeaders(headerfunc.apply("Nest-Bundle-Signature"),
+				headerfunc.apply("Nest-Bundle-Signature-Version"));
+		if (result != null) {
+			return result;
+		}
+		//support getting the signatures from the x-goog-meta- headers if the bundle is served from google storage
+		result = BundleSignatureHolder.fromHeaders(headerfunc.apply("X-Goog-Meta-Nest-Bundle-Signature"),
+				headerfunc.apply("X-Goog-Meta-Nest-Bundle-Signature-Version"));
+		return result;
 	}
 
 	private JarNestRepositoryBundleImpl createBundle(Path resultjarpath) throws IOException {
