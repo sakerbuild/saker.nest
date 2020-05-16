@@ -39,6 +39,7 @@ import saker.nest.bundle.NestRepositoryExternalArchiveClassLoader;
 import saker.nest.bundle.SimpleExternalArchiveKey;
 import saker.nest.jdkutil.JavaToolsModulePatcher;
 import saker.nest.scriptinfo.reflection.ReflectionExternalScriptInformationProvider;
+import saker.nest.thirdparty.org.json.JSONException;
 import saker.nest.thirdparty.org.json.JSONObject;
 import saker.nest.thirdparty.org.json.JSONTokener;
 import testing.saker.nest.TestFlag;
@@ -98,39 +99,42 @@ public class NestBuildRepositoryImpl implements BuildRepository {
 			if (bundlecl == null) {
 				return null;
 			}
-			JSONTokener tokener = new JSONTokener(hashstr);
-			Object v = tokener.nextValue();
-			if (v instanceof String) {
-				if (!Objects.equals(v,
-						StringUtils.toHexString(bundlecl.getSharedBundleHashWithClassPathDependencies()))) {
-					return null;
+			try {
+				JSONTokener tokener = new JSONTokener(hashstr);
+				Object v = tokener.nextValue();
+				if (v instanceof String) {
+					if (!Objects.equals(v,
+							StringUtils.toHexString(bundlecl.getSharedBundleHashWithClassPathDependencies()))) {
+						return null;
+					}
+					return bundlecl;
+				} else if (v instanceof JSONObject) {
+					JSONObject json = (JSONObject) v;
+					String hash = json.optString("hash", null);
+					if (!Objects.equals(hash,
+							StringUtils.toHexString(bundlecl.getSharedBundleHashWithClassPathDependencies()))) {
+						return null;
+					}
+					String uristr = json.optString("uri", null);
+					if (uristr == null) {
+						return null;
+					}
+					URI uri;
+					try {
+						uri = new URI(uristr);
+					} catch (URISyntaxException e) {
+						return null;
+					}
+					String entryname = json.optString("entry", null);
+					SimpleExternalArchiveKey archivekey = new SimpleExternalArchiveKey(uri, entryname);
+					DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader> depcl = bundlecl
+							.getExternalDependencyClassLoaders().get(archivekey);
+					if (depcl == null) {
+						return null;
+					}
+					return depcl.classLoader;
 				}
-				return bundlecl;
-			} else if (v instanceof JSONObject) {
-				JSONObject json = (JSONObject) v;
-				String hash = json.optString("hash", null);
-				if (!Objects.equals(hash,
-						StringUtils.toHexString(bundlecl.getSharedBundleHashWithClassPathDependencies()))) {
-					return null;
-				}
-				String uristr = json.optString("uri", null);
-				if (uristr == null) {
-					return null;
-				}
-				URI uri;
-				try {
-					uri = new URI(uristr);
-				} catch (URISyntaxException e) {
-					return null;
-				}
-				String entryname = json.optString("entry", null);
-				SimpleExternalArchiveKey archivekey = new SimpleExternalArchiveKey(uri, entryname);
-				DependentClassLoader<? extends NestRepositoryExternalArchiveClassLoader> depcl = bundlecl
-						.getExternalDependencyClassLoaders().get(archivekey);
-				if (depcl == null) {
-					return null;
-				}
-				return depcl.classLoader;
+			} catch (JSONException e) {
 			}
 			return null;
 		}
