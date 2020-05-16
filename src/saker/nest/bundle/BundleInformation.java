@@ -112,6 +112,13 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	private static final long serialVersionUID = 1L;
 
 	/**
+	 * Name of the bundle directory entry under which the meta-information files for the saker.nest bundles reside.
+	 * 
+	 * @since saker.nest 0.8.5
+	 */
+	public static final String DIR_META_INF_NEST = "META-INF/nest/";
+
+	/**
 	 * Bundle entry name for the task declarations.
 	 * <p>
 	 * If a bundle entry is present at the value of this constant, then that file is used to read the declared tasks in
@@ -133,7 +140,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	 * <p>
 	 * Duplicate task declarations may not exists.
 	 */
-	public static final String ENTRY_BUNDLE_TASKS = "META-INF/nest/tasks";
+	public static final String ENTRY_BUNDLE_TASKS = DIR_META_INF_NEST + "tasks";
 	/**
 	 * Bundle entry name for the bundle dependencies.
 	 * <p>
@@ -149,7 +156,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	 * The classpath dependencies can have various meta-datas that can be used to configure the classpath loading for
 	 * various environments. See the <code>DEPENDENCY_META_*</code> constants declared in this class.
 	 */
-	public static final String ENTRY_BUNDLE_DEPENDENCIES = "META-INF/nest/dependencies";
+	public static final String ENTRY_BUNDLE_DEPENDENCIES = DIR_META_INF_NEST + "dependencies";
 
 	/**
 	 * Bundle entry name for external dependencies.
@@ -165,7 +172,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	 * 
 	 * @since saker.nest 0.8.5
 	 */
-	public static final String ENTRY_BUNDLE_EXTERNAL_DEPENDENCIES = "META-INF/nest/external_dependencies";
+	public static final String ENTRY_BUNDLE_EXTERNAL_DEPENDENCIES = DIR_META_INF_NEST + "external_dependencies";
 
 	/**
 	 * Manifest attribute name for the bundle information version number.
@@ -439,6 +446,9 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	private static final Collection<String> ALLOWED_SPECIAL_CLASSPATH_DEPENDENCY_KINDS = ImmutableUtils
 			.makeImmutableNavigableSet(new String[] { SPECIAL_CLASSPATH_DEPENDENCY_JDK_TOOLS,
 					SPECIAL_CLASSPATH_DEPENDENCY_JDK_COMPILER_OPEN });
+	private static final Collection<String> ALLOWED_META_INF_NEST_ENTRY_NAMES = ImmutableUtils
+			.makeImmutableNavigableSet(
+					new String[] { ENTRY_BUNDLE_TASKS, ENTRY_BUNDLE_DEPENDENCIES, ENTRY_BUNDLE_EXTERNAL_DEPENDENCIES });
 
 	private static final Pattern PATTERN_COMMA_WHITESPACE_SPLIT = Pattern.compile("[, \\t]+");
 
@@ -464,15 +474,18 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	public BundleInformation() {
 	}
 
-	private BundleInformation(Manifest bundlemanifest, ZipFile zf) throws IOException {
+	private BundleInformation(Manifest bundlemanifest, ZipFile zf, boolean strictvalidation) throws IOException {
 		if (bundlemanifest == null) {
 			throw new InvalidNestBundleException("No manifest found. (" + zf.getName() + ")");
 		}
 		int formatversion = getBundleFormatVersion(bundlemanifest);
-		if (formatversion != 1) {
+		if (formatversion < 1) {
 			throw new InvalidNestBundleException("Invalid bundle format version: " + formatversion);
 		}
-		validateBundleManifest(bundlemanifest);
+		if (formatversion != 1) {
+			throw new InvalidNestBundleException("Unsupported bundle format version: " + formatversion);
+		}
+		validateBundleManifest(bundlemanifest, strictvalidation);
 		Set<String> entrynames = new TreeSet<>(String::compareToIgnoreCase);
 		Enumeration<? extends ZipEntry> entries = zf.entries();
 		while (entries.hasMoreElements()) {
@@ -481,7 +494,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 			if (!entrynames.add(ename)) {
 				throw new InvalidNestBundleException("Duplicate bundle entry: " + ename);
 			}
-			checkBundleEntryName(ename);
+			checkBundleEntryName(ename, strictvalidation);
 		}
 
 		this.bundleId = readBundleIdentifier(bundlemanifest);
@@ -492,7 +505,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 		this.mainClass = bundlemanifest.getMainAttributes().getValue(Attributes.Name.MAIN_CLASS);
 		verifyContainsRequiredClassFiles(entrynames, taskClassNames, this.mainClass);
 
-		this.specialClasspathDependencies = getSpecialClassPathDependencies(bundlemanifest);
+		this.specialClasspathDependencies = getSpecialClassPathDependencies(bundlemanifest, strictvalidation);
 		this.sourceAttachmentBundle = getSourceAttachmentBundleIdentifier(bundlemanifest);
 		this.docAttachmentBundle = getDocumentationAttachmentBundleIdentifier(bundlemanifest);
 		this.supportedClassPathJreVersionRange = readSupportedJreVersionRange(bundlemanifest);
@@ -503,7 +516,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 		verifyBundleDependenciesForBundleIdentifier(this.dependencyInformation, this.bundleId);
 	}
 
-	private BundleInformation(Manifest bundlemanifest, ZipInputStream jis)
+	private BundleInformation(Manifest bundlemanifest, ZipInputStream jis, boolean strictvalidation)
 			throws NullPointerException, IOException, InvalidNestBundleException {
 		ByteArrayRegion dependenciesbytes = null;
 		ByteArrayRegion extdependenciesbytes = null;
@@ -513,7 +526,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 		Set<String> entrynames = new TreeSet<>(String::compareToIgnoreCase);
 		for (ZipEntry e; (e = jis.getNextEntry()) != null;) {
 			String ename = e.getName();
-			checkBundleEntryName(ename);
+			checkBundleEntryName(ename, strictvalidation);
 			if (!entrynames.add(ename)) {
 				throw new InvalidNestBundleException("Duplicate bundle entry: " + ename);
 			}
@@ -544,10 +557,13 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 			throw new InvalidNestBundleException("No manifest found.");
 		}
 		int formatversion = getBundleFormatVersion(bundlemanifest);
-		if (formatversion != 1) {
+		if (formatversion < 1) {
 			throw new InvalidNestBundleException("Invalid bundle format version: " + formatversion);
 		}
-		validateBundleManifest(bundlemanifest);
+		if (formatversion != 1) {
+			throw new InvalidNestBundleException("Unsupported bundle format version: " + formatversion);
+		}
+		validateBundleManifest(bundlemanifest, strictvalidation);
 
 		this.bundleId = readBundleIdentifier(bundlemanifest);
 
@@ -581,7 +597,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 		this.mainClass = bundlemanifest.getMainAttributes().getValue(Attributes.Name.MAIN_CLASS);
 		verifyContainsRequiredClassFiles(entrynames, taskClassNames, this.mainClass);
 
-		this.specialClasspathDependencies = getSpecialClassPathDependencies(bundlemanifest);
+		this.specialClasspathDependencies = getSpecialClassPathDependencies(bundlemanifest, strictvalidation);
 		this.sourceAttachmentBundle = getSourceAttachmentBundleIdentifier(bundlemanifest);
 		this.docAttachmentBundle = getDocumentationAttachmentBundleIdentifier(bundlemanifest);
 		this.supportedClassPathJreVersionRange = readSupportedJreVersionRange(bundlemanifest);
@@ -592,31 +608,41 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 		verifyBundleDependenciesForBundleIdentifier(dependencies, this.bundleId);
 	}
 
-	private static void checkBundleEntryName(String ename) {
+	private static void checkBundleEntryName(String ename, boolean strictvalidation) {
 		try {
 			BundleUtils.checkArchiveEntryName(ename);
 		} catch (IllegalArchiveEntryNameException e) {
 			throw new InvalidNestBundleException(e.getMessage());
 		}
-	}
-
-	private static void validateBundleManifest(Manifest manifest) {
-		//disallow any special Nest- attribute. They are reserved for future compatibility.
-		for (Object key : manifest.getMainAttributes().keySet()) {
-			Attributes.Name name = (Name) key;
-			if (StringUtils.startsWithIgnoreCase(name.toString(), "Nest-")) {
-				if (!ALLOWED_NEST_MANIFEST_NAMES.contains(name)) {
-					throw new InvalidNestBundleException("Invalid Nest manifest main attribute: " + name);
+		if (strictvalidation) {
+			if (ename.startsWith(DIR_META_INF_NEST)) {
+				if (!ALLOWED_META_INF_NEST_ENTRY_NAMES.contains(ename)) {
+					throw new InvalidNestBundleException("Unrecognized saker.nest meta file: " + ename);
 				}
 			}
 		}
-		for (Entry<String, Attributes> entry : manifest.getEntries().entrySet()) {
-			Attributes attrs = entry.getValue();
-			for (Object key : attrs.keySet()) {
+	}
+
+	private static void validateBundleManifest(Manifest manifest, boolean strictvalidation) {
+		//attributes that start with Nest- are reserved for future use.
+		if (strictvalidation) {
+			//only throw exceptions if strict validation is performed
+			for (Object key : manifest.getMainAttributes().keySet()) {
 				Attributes.Name name = (Name) key;
 				if (StringUtils.startsWithIgnoreCase(name.toString(), "Nest-")) {
-					throw new InvalidNestBundleException(
-							"Invalid Nest manifest entry attribute: " + name + " (" + entry.getKey() + ")");
+					if (!ALLOWED_NEST_MANIFEST_NAMES.contains(name)) {
+						throw new InvalidNestBundleException("Invalid Nest manifest main attribute: " + name);
+					}
+				}
+			}
+			for (Entry<String, Attributes> entry : manifest.getEntries().entrySet()) {
+				Attributes attrs = entry.getValue();
+				for (Object key : attrs.keySet()) {
+					Attributes.Name name = (Name) key;
+					if (StringUtils.startsWithIgnoreCase(name.toString(), "Nest-")) {
+						throw new InvalidNestBundleException(
+								"Invalid Nest manifest entry attribute: " + name + " (" + entry.getKey() + ")");
+					}
 				}
 			}
 		}
@@ -658,7 +684,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	 *             If the bundle validation fails.
 	 */
 	public BundleInformation(ZipFile zf) throws NullPointerException, IOException, InvalidNestBundleException {
-		this(getManifestFromZip(Objects.requireNonNull(zf, "zip file")), zf);
+		this(getManifestFromZip(Objects.requireNonNull(zf, "zip file")), zf, false);
 	}
 
 	/**
@@ -674,7 +700,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	 *             If the bundle validation fails.
 	 */
 	public BundleInformation(JarFile jf) throws NullPointerException, IOException, InvalidNestBundleException {
-		this(Objects.requireNonNull(jf, "jar file").getManifest(), jf);
+		this(Objects.requireNonNull(jf, "jar file").getManifest(), jf, false);
 	}
 
 	/**
@@ -690,7 +716,75 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	 *             If the bundle validation fails.
 	 */
 	public BundleInformation(JarInputStream jis) throws NullPointerException, IOException, InvalidNestBundleException {
-		this(Objects.requireNonNull(jis, "jar input").getManifest(), jis);
+		this(Objects.requireNonNull(jis, "jar input").getManifest(), jis, false);
+	}
+
+	/**
+	 * Creates a new instance based on the contents of the argument JAR input stream.
+	 * <p>
+	 * The method also performs strict validation of the bundle properties. Strict validation ensures that the bundle
+	 * declares facilities only that is supported by the current repository runtime.
+	 * 
+	 * @param jis
+	 *            The JAR input.
+	 * @throws NullPointerException
+	 *             If the argument is <code>null</code>.
+	 * @throws IOException
+	 *             In case of I/O error.
+	 * @throws InvalidNestBundleException
+	 *             If the bundle validation fails.
+	 * @since saker.nest 0.8.5
+	 */
+	public static BundleInformation createStrictValidated(JarInputStream jis)
+			throws InvalidNestBundleException, NullPointerException, IOException {
+		return new BundleInformation(Objects.requireNonNull(jis, "jar input").getManifest(), jis, true);
+	}
+
+	/**
+	 * Creates a new instance based on the contents of the argument JAR file.
+	 * <p>
+	 * The method also performs strict validation of the bundle properties. Strict validation ensures that the bundle
+	 * declares facilities only that is supported by the current repository runtime.
+	 * 
+	 * @param jf
+	 *            The JAR file.
+	 * @throws NullPointerException
+	 *             If the argument is <code>null</code>.
+	 * @throws IOException
+	 *             In case of I/O error.
+	 * @throws InvalidNestBundleException
+	 *             If the bundle validation fails.
+	 * @since saker.nest 0.8.5
+	 */
+	public static BundleInformation createStrictValidated(JarFile jf)
+			throws InvalidNestBundleException, NullPointerException, IOException {
+		return createStrictValidated(Objects.requireNonNull(jf, "jar file").getManifest(), jf);
+	}
+
+	/**
+	 * Creates a new instance based on the contents of the argument ZIP file.
+	 * <p>
+	 * The method also performs strict validation of the bundle properties. Strict validation ensures that the bundle
+	 * declares facilities only that is supported by the current repository runtime.
+	 * 
+	 * @param zf
+	 *            The Zip file.
+	 * @throws NullPointerException
+	 *             If the argument is <code>null</code>.
+	 * @throws IOException
+	 *             In case of I/O error.
+	 * @throws InvalidNestBundleException
+	 *             If the bundle validation fails.
+	 * @since saker.nest 0.8.5
+	 */
+	public static BundleInformation createStrictValidated(ZipFile zf)
+			throws InvalidNestBundleException, NullPointerException, IOException {
+		return createStrictValidated(getManifestFromZip(Objects.requireNonNull(zf, "zip file")), zf);
+	}
+
+	private static BundleInformation createStrictValidated(Manifest manifest, ZipFile zf)
+			throws InvalidNestBundleException, NullPointerException, IOException {
+		return new BundleInformation(manifest, zf, true);
 	}
 
 	/**
@@ -955,7 +1049,8 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 				+ ", sourceAttachmentBundle=" + sourceAttachmentBundle + ", mainClass=" + mainClass + "]";
 	}
 
-	private static NavigableSet<String> getSpecialClassPathDependencies(Manifest bundlemanifest) {
+	private static NavigableSet<String> getSpecialClassPathDependencies(Manifest bundlemanifest,
+			boolean strictvalidation) {
 		String attr = bundlemanifest.getMainAttributes().getValue(MANIFEST_NAME_CLASSPATH_SPECIAL_DEPENDENCY);
 		if (attr == null) {
 			return Collections.emptyNavigableSet();
@@ -966,8 +1061,13 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 				continue;
 			}
 			if (!ALLOWED_SPECIAL_CLASSPATH_DEPENDENCY_KINDS.contains(dep)) {
-				throw new InvalidNestBundleException("Invalid special classpath dependency specified: " + dep
-						+ ". Allowed: " + StringUtils.toStringJoin(", ", ALLOWED_SPECIAL_CLASSPATH_DEPENDENCY_KINDS));
+				if (strictvalidation) {
+					//only throw an exception if strict validation is performed
+					throw new InvalidNestBundleException(
+							"Invalid special classpath dependency specified: " + dep + ". Allowed: "
+									+ StringUtils.toStringJoin(", ", ALLOWED_SPECIAL_CLASSPATH_DEPENDENCY_KINDS));
+				}
+				continue;
 			}
 			result.add(dep);
 		}
