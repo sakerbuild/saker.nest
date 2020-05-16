@@ -63,13 +63,12 @@ public class BasicServerNestMetric implements NestMetric {
 	}
 
 	protected void applyBundleDownloadSignatureResponseHeaders(String requesturl, Map<String, String> result) {
-		System.out.println("BasicServerNestMetric.applyBundleDownloadSignatureResponseHeaders() " + requesturl + " -> "
-				+ bundleSigningVersion);
 		try {
-			if (requesturl.startsWith("https://testurl/bundle/download/")) {
+			String baseurl = "https://testurl/bundle/download/";
+			if (requesturl.startsWith(baseurl)) {
 				Signature sig = Signature.getInstance("SHA256withRSA");
 				sig.initSign(getBundleSigningPrivateKey());
-				try (InputStream in = getServerRequestResponseStream(requesturl)) {
+				try (InputStream in = getBundleInputStream(requesturl.substring(baseurl.length()))) {
 					StreamUtils.copyStream(in, sig);
 				}
 				byte[] signaturebytes = sig.sign();
@@ -79,6 +78,10 @@ public class BasicServerNestMetric implements NestMetric {
 		} catch (Exception e) {
 			throw new AssertionError(e);
 		}
+	}
+
+	protected InputStream getBundleInputStream(String bundleid) throws IOException {
+		return getServerRequestResponseStream("https://testurl/bundle/download/" + bundleid);
 	}
 
 	protected PrivateKey getBundleSigningPrivateKey() {

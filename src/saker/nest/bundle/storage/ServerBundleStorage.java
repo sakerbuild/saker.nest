@@ -28,6 +28,7 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.UnsupportedEncodingException;
 import java.net.HttpURLConnection;
+import java.net.ProtocolException;
 import java.net.URI;
 import java.net.URL;
 import java.net.URLEncoder;
@@ -110,6 +111,9 @@ import testing.saker.nest.TestFlag;
 
 public class ServerBundleStorage extends AbstractBundleStorage {
 	//XXX we should employ some sort of caching for index files. Like If-None-Match or Etag based caching.
+
+	private static final String HTTP_USER_AGENT = "saker.nest/" + saker.nest.meta.Versions.VERSION_STRING_FULL
+			+ " (saker.build " + saker.build.meta.Versions.VERSION_STRING_FULL + ")";
 
 	private static final Encoder BASE64_ENCODER = Base64.getUrlEncoder().withoutPadding();
 
@@ -458,8 +462,8 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 							"Cannot fetch bundle signing key for offline storage: " + serverHost);
 				}
 				// fetch from server
-				ByteArrayRegion retrievedkeybytes = makeServerRequest(false,
-						serverHost + "/bundle_signature_key/" + version, (rc, in, err, headerfunc) -> {
+				ByteArrayRegion retrievedkeybytes = makeServerRequest(FLAG_REQUEST_FOLLOW_REDIRECTS,
+						serverHost + "/bundle_signature_key/" + version, "GET", (url, rc, in, err, headerfunc) -> {
 							if (rc == HttpURLConnection.HTTP_OK) {
 								return StreamUtils.readStreamFully(in.get());
 							}
@@ -627,48 +631,55 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		return result;
 	}
 
-	private static <T> T makeServerRequest(boolean offline, String requesturl, ServerRequestHandler<T> handler)
-			throws IOException {
-		return makeServerRequest(offline ? FLAG_REQUEST_OFFLINE : 0, requesturl, null, handler);
-	}
-
 	private static final int FLAG_REQUEST_OFFLINE = 1 << 0;
 	private static final int FLAG_REQUEST_NO_DISCONNECT_ON_200 = 1 << 1;
+	private static final int FLAG_REQUEST_FOLLOW_REDIRECTS = 1 << 2;
 
 	private static <T> T makeServerRequest(int flags, String requesturl, String method, ServerRequestHandler<T> handler)
 			throws IOException {
 		if (((flags & FLAG_REQUEST_OFFLINE) == FLAG_REQUEST_OFFLINE)) {
 			throw new OfflineStorageIOException("Failed to make request in offline mode. (" + requesturl + ")");
 		}
+		URL url = new URL(requesturl);
+		return makeURLRequest(flags, url, method, handler);
+	}
+
+	private static <T> T makeURLRequest(int flags, URL url, String method, ServerRequestHandler<T> handler)
+			throws IOException, ProtocolException, ServerConnectionFailedIOException {
+		if (((flags & FLAG_REQUEST_OFFLINE) == FLAG_REQUEST_OFFLINE)) {
+			throw new OfflineStorageIOException("Failed to make request in offline mode. (" + url + ")");
+		}
 		try {
 			if (TestFlag.ENABLED) {
-				Integer rc = TestFlag.metric().getServerRequestResponseCode(requesturl);
+				Integer rc = TestFlag.metric().getServerRequestResponseCode(url.toString());
 				if (rc != null) {
-					return handler.handle(rc, () -> TestFlag.metric().getServerRequestResponseStream(requesturl),
-							() -> TestFlag.metric().getServerRequestResponseErrorStream(requesturl),
-							(header) -> TestFlag.metric().getServerRequestResponseHeaders(requesturl).get(header));
+					return handler.handle(url, rc,
+							() -> TestFlag.metric().getServerRequestResponseStream(url.toString()),
+							() -> TestFlag.metric().getServerRequestResponseErrorStream(url.toString()),
+							(header) -> TestFlag.metric().getServerRequestResponseHeaders(url.toString()).get(header));
 				}
 			}
-			URL url = new URL(requesturl);
 			HttpURLConnection connection = (HttpURLConnection) url.openConnection();
 			//set some timeout for the request not to deadlock the build
 			connection.setConnectTimeout(30000);
 			connection.setReadTimeout(30000);
 			connection.setRequestProperty("Accept-Encoding", "gzip");
+			connection.setRequestProperty("User-Agent", HTTP_USER_AGENT);
 			if (method != null) {
 				connection.setRequestMethod(method);
 			}
-			//TODO the redirect shouldn't be followed, but handled by the request handler
-			connection.setInstanceFollowRedirects(true);
+			if (((flags & FLAG_REQUEST_FOLLOW_REDIRECTS) == FLAG_REQUEST_FOLLOW_REDIRECTS)) {
+				connection.setInstanceFollowRedirects(true);
+			}
 			int rc;
 			try {
 				connection.connect();
 				rc = connection.getResponseCode();
 			} catch (IOException e) {
-				throw new ServerConnectionFailedIOException("Failed to connect to: " + requesturl, e);
+				throw new ServerConnectionFailedIOException("Failed to connect to: " + url, e);
 			}
 			try {
-				return handler.handle(rc, () -> unGzipizeInputStream(connection, connection.getInputStream()),
+				return handler.handle(url, rc, () -> unGzipizeInputStream(connection, connection.getInputStream()),
 						() -> unGzipizeInputStream(connection, connection.getErrorStream()),
 						connection::getHeaderField);
 			} finally {
@@ -677,7 +688,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 				}
 			}
 		} catch (IOException e) {
-			throw new IOException("Failed to execute server request. (" + requesturl + ")", e);
+			throw new IOException("Failed to execute server request. (" + url + ")", e);
 		}
 	}
 
@@ -878,8 +889,9 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 	private BundleSignatureHolder downloadBundleSignature(BundleIdentifier bundleid, boolean offline)
 			throws IOException {
 		String requesturl = getBundleDownloadURL(bundleid);
-		return makeServerRequest(offline ? FLAG_REQUEST_OFFLINE : 0, requesturl, "HEAD",
-				(rc, ins, errs, headerfunc) -> {
+		//don't follow redirects
+		return makeServerRequest((offline ? FLAG_REQUEST_OFFLINE : 0), requesturl, "HEAD",
+				(url, rc, ins, errs, headerfunc) -> {
 					if (rc == HttpURLConnection.HTTP_OK) {
 						//HTTP OK
 						return BundleSignatureHolder.fromHeaders(headerfunc.apply("Nest-Bundle-Signature"),
@@ -903,86 +915,122 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 			throws BundleLoadingFailedException {
 		try {
 			String requesturl = getBundleDownloadURL(bundleid);
-			return makeServerRequest(offline, requesturl, (rc, ins, errs, headerfunc) -> {
-				if (rc == HttpURLConnection.HTTP_OK) {
-					//HTTP OK
-					//persist to a temporary file, then move that file to the target
+			int requestflags = offline ? FLAG_REQUEST_OFFLINE : 0;
+			return makeServerRequest(requestflags, requesturl, "GET", new ServerRequestHandler<DownloadedBundle>() {
+				private BundleSignatureHolder signatureHolder;
+				private int redirectCount = 0;
 
-					BundleSignatureHolder signatureholder = BundleSignatureHolder.fromHeaders(
-							headerfunc.apply("Nest-Bundle-Signature"),
-							headerfunc.apply("Nest-Bundle-Signature-Version"));
-
-					byte[] randbytes = new byte[8];
-					secureRandom.nextBytes(randbytes);
-					Path tempfilepath = resultjarpath.resolveSibling(resultjarpath.getFileName().toString() + ".temp_"
-							+ StringUtils.toHexString(randbytes) + ".jar");
-					Files.createDirectories(resultjarpath.getParent());
-					try {
-						try (InputStream is = ins.get();
-								OutputStream os = Files.newOutputStream(tempfilepath, StandardOpenOption.CREATE_NEW)) {
-							StreamUtils.copyStream(is, os);
-						}
-						try {
-							Files.move(tempfilepath, resultjarpath);
-						} catch (IOException e) {
-							//the moving of the file failed
-							//this can happen if some other process concurrently downloads the file
-							// and opens it without allowing us to overwrite
-							//we can continue execution, as we verify the contents of the JAR before opening it
-						}
-						try {
-							JarNestRepositoryBundleImpl result = createBundle(resultjarpath);
-
-							try {
-								if (!bundleid.equals(result.getBundleIdentifier())) {
-									throw ObjectUtils.sneakyThrow(
-											new BundleLoadingFailedException("Downloaded bundle identifier mismatch: "
-													+ result.getBundleIdentifier() + " with expected: " + bundleid));
-								}
-								if (signatureholder != null) {
-									try {
-										signatureholder.writeTo(getBundleSignaturePathFromBundlePath(resultjarpath));
-									} catch (IOException e) {
-										//ignore
-									}
-								}
-								return new DownloadedBundle(result, signatureholder);
-							} catch (Throwable e) {
-								IOUtils.addExc(e, IOUtils.closeExc(result));
-								throw e;
+				@Override
+				public DownloadedBundle handle(URL url, int rc, IOSupplier<? extends InputStream> ins,
+						IOSupplier<? extends InputStream> errs, Function<? super String, ? extends String> headerfunc)
+						throws IOException {
+					if (rc >= 300 && rc < 400) {
+						//redirection
+						if (signatureHolder == null) {
+							BundleSignatureHolder currentsig = BundleSignatureHolder.fromHeaders(
+									headerfunc.apply("Nest-Bundle-Signature"),
+									headerfunc.apply("Nest-Bundle-Signature-Version"));
+							if (currentsig != null) {
+								signatureHolder = currentsig;
 							}
-						} catch (IOException e) {
-							//failed to open the jar
-							//this should not happen, only if the downloaded bundle is corrupted
-							//expect the next download to be corrupted too.
-							//the build will probably fail so the use is notified about the failure, and an environment restart can solve this
-							throw ObjectUtils.sneakyThrow(
-									new BundleLoadingFailedException("Failed to download bundle: " + bundleid, e));
-						} catch (InvalidNestBundleException e) {
-							//shouldn't really happen as downloaded bundles should be valid, but handle nonetheless
-							throw ObjectUtils.sneakyThrow(new BundleLoadingFailedException(
-									"Failed to load downloaded bundle: " + bundleid, e));
 						}
-					} finally {
+						String location = headerfunc.apply("Location");
+						if (location == null) {
+							throw new IOException("No Location header for redirection. (" + rc + ")");
+						}
+						if (++redirectCount > 10) {
+							throw new IOException("Too many redirections for downloading bundle: " + bundleid
+									+ " (next: " + location + ")");
+						}
+						return makeURLRequest(requestflags, new URL(url, location), "GET", this);
+					}
+					if (rc == HttpURLConnection.HTTP_OK) {
+						//HTTP OK
+						//persist to a temporary file, then move that file to the target
+
+						if (signatureHolder == null) {
+							BundleSignatureHolder currentsig = BundleSignatureHolder.fromHeaders(
+									headerfunc.apply("Nest-Bundle-Signature"),
+									headerfunc.apply("Nest-Bundle-Signature-Version"));
+							if (currentsig != null) {
+								signatureHolder = currentsig;
+							}
+						}
+
+						byte[] randbytes = new byte[8];
+						secureRandom.nextBytes(randbytes);
+						Path tempfilepath = resultjarpath.resolveSibling(resultjarpath.getFileName().toString()
+								+ ".temp_" + StringUtils.toHexString(randbytes) + ".jar");
+						Files.createDirectories(resultjarpath.getParent());
 						try {
-							Files.deleteIfExists(tempfilepath);
-						} catch (IOException e) {
-							//ignoreable
+							try (InputStream is = ins.get();
+									OutputStream os = Files.newOutputStream(tempfilepath,
+											StandardOpenOption.CREATE_NEW)) {
+								StreamUtils.copyStream(is, os);
+							}
+							try {
+								Files.move(tempfilepath, resultjarpath);
+							} catch (IOException e) {
+								//the moving of the file failed
+								//this can happen if some other process concurrently downloads the file
+								// and opens it without allowing us to overwrite
+								//we can continue execution, as we verify the contents of the JAR before opening it
+							}
+							try {
+								JarNestRepositoryBundleImpl result = createBundle(resultjarpath);
+
+								try {
+									if (!bundleid.equals(result.getBundleIdentifier())) {
+										throw ObjectUtils.sneakyThrow(new BundleLoadingFailedException(
+												"Downloaded bundle identifier mismatch: " + result.getBundleIdentifier()
+														+ " with expected: " + bundleid));
+									}
+									if (signatureHolder != null) {
+										try {
+											signatureHolder
+													.writeTo(getBundleSignaturePathFromBundlePath(resultjarpath));
+										} catch (IOException e) {
+											//ignore
+										}
+									}
+									return new DownloadedBundle(result, signatureHolder);
+								} catch (Throwable e) {
+									IOUtils.addExc(e, IOUtils.closeExc(result));
+									throw e;
+								}
+							} catch (IOException e) {
+								//failed to open the jar
+								//this should not happen, only if the downloaded bundle is corrupted
+								//expect the next download to be corrupted too.
+								//the build will probably fail so the use is notified about the failure, and an environment restart can solve this
+								throw ObjectUtils.sneakyThrow(
+										new BundleLoadingFailedException("Failed to download bundle: " + bundleid, e));
+							} catch (InvalidNestBundleException e) {
+								//shouldn't really happen as downloaded bundles should be valid, but handle nonetheless
+								throw ObjectUtils.sneakyThrow(new BundleLoadingFailedException(
+										"Failed to load downloaded bundle: " + bundleid, e));
+							}
+						} finally {
+							try {
+								Files.deleteIfExists(tempfilepath);
+							} catch (IOException e) {
+								//ignoreable
+							}
 						}
 					}
+					String errstr = "";
+					IOException errexc = null;
+					try {
+						errstr = readErrorStreamOrEmpty(errs);
+					} catch (IOException e) {
+						errexc = e;
+					}
+					throw ObjectUtils
+							.sneakyThrow(IOUtils.addExc(
+									new BundleLoadingFailedException("Failed to download bundle: " + bundleid
+											+ " with HTTP response code: " + rc + " with error payload: " + errstr),
+									errexc));
 				}
-				String errstr = "";
-				IOException errexc = null;
-				try {
-					errstr = readErrorStreamOrEmpty(errs);
-				} catch (IOException e) {
-					errexc = e;
-				}
-				throw ObjectUtils
-						.sneakyThrow(IOUtils.addExc(
-								new BundleLoadingFailedException("Failed to download bundle: " + bundleid
-										+ " with HTTP response code: " + rc + " with error payload: " + errstr),
-								errexc));
 			});
 		} catch (IOException e) {
 			throw new BundleLoadingFailedException("Failed to download bundle: " + bundleid, e);
@@ -1063,7 +1111,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 	}
 
 	private interface ServerRequestHandler<T> {
-		public T handle(int responsecode, IOSupplier<? extends InputStream> inputsupplier,
+		public T handle(URL url, int responsecode, IOSupplier<? extends InputStream> inputsupplier,
 				IOSupplier<? extends InputStream> errorsupplier,
 				Function<? super String, ? extends String> headersupplier) throws IOException;
 	}
@@ -1575,15 +1623,16 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 			if (((options.flags & FLAG_REQUESTS_UNCACHE) == FLAG_REQUESTS_UNCACHE)) {
 				url += "?uncache-" + UUID.randomUUID();
 			}
-			return makeServerRequest(offline, url, (rc, ins, errs, headerfunc) -> {
-				if (rc == HttpURLConnection.HTTP_OK) {
-					try (InputStream is = ins.get();
-							InputStreamReader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
-						return new JSONObject(new JSONTokener(reader));
-					}
-				}
-				throw new IOException("Unexpected response code from request: " + rc);
-			});
+			return makeServerRequest((offline ? FLAG_REQUEST_OFFLINE : 0) | FLAG_REQUEST_FOLLOW_REDIRECTS, url, "GET",
+					(requrl, rc, ins, errs, headerfunc) -> {
+						if (rc == HttpURLConnection.HTTP_OK) {
+							try (InputStream is = ins.get();
+									InputStreamReader reader = new InputStreamReader(is, StandardCharsets.UTF_8)) {
+								return new JSONObject(new JSONTokener(reader));
+							}
+						}
+						throw new IOException("Unexpected response code from request: " + rc);
+					});
 		}
 
 		protected abstract T generateData(Collection<JSONObject> lookups);
@@ -1865,8 +1914,8 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 				throw new FileNotFoundException("Failed to download external dependency without SHA-256: " + uri);
 			}
 			String url = serverHost + "/external/mirror/" + BundleUtils.sha256(uri) + "/" + expectedhashes.sha256;
-			return makeServerRequest((offline ? FLAG_REQUEST_OFFLINE : 0) | FLAG_REQUEST_NO_DISCONNECT_ON_200, url,
-					"GET", (rc, ins, errs, headerfunc) -> {
+			return makeServerRequest((offline ? FLAG_REQUEST_OFFLINE : 0) | FLAG_REQUEST_NO_DISCONNECT_ON_200
+					| FLAG_REQUEST_FOLLOW_REDIRECTS, url, "GET", (requrl, rc, ins, errs, headerfunc) -> {
 						if (rc == HttpURLConnection.HTTP_OK) {
 							//HTTP OK
 							return ins.get();
