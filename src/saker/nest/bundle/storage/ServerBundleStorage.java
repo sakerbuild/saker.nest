@@ -668,9 +668,8 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 			if (method != null) {
 				connection.setRequestMethod(method);
 			}
-			if (((flags & FLAG_REQUEST_FOLLOW_REDIRECTS) == FLAG_REQUEST_FOLLOW_REDIRECTS)) {
-				connection.setInstanceFollowRedirects(true);
-			}
+			connection.setInstanceFollowRedirects(
+					(flags & FLAG_REQUEST_FOLLOW_REDIRECTS) == FLAG_REQUEST_FOLLOW_REDIRECTS);
 			int rc;
 			try {
 				connection.connect();
