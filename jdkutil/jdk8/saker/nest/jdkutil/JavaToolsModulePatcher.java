@@ -17,6 +17,7 @@ package saker.nest.jdkutil;
 
 import java.io.IOException;
 
+import saker.build.thirdparty.saker.util.classloader.ClassLoaderResolver;
 import saker.build.util.java.JavaTools;
 
 public class JavaToolsModulePatcher {
@@ -28,19 +29,12 @@ public class JavaToolsModulePatcher {
 		return JavaTools.getJDKToolsClassLoader();
 	}
 
-	public static ClassLoader getJavaToolsClassLoaderIfLoaded() {
-		if (saker.build.meta.Versions.VERSION_FULL_COMPOUND >= 8_012) {
-			//TODO use JavaTools.getJDKToolsClassLoaderIfLoaded() when running on saker.build 0.8.12 and above
-		}
-		try {
-			return JavaTools.getJDKToolsClassLoader();
-		} catch (IOException e) {
-		}
-		return null;
-	}
-
 	public static boolean isDifferentFromDefaultJavaToolsClassLoader() {
 		return false;
+	}
+
+	public static ClassLoaderResolver getClassLoaderResolver() {
+		return null;
 	}
 
 }

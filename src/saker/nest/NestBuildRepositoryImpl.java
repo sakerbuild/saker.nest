@@ -33,20 +33,17 @@ import saker.build.thirdparty.saker.util.classloader.ClassLoaderResolverRegistry
 import saker.build.thirdparty.saker.util.classloader.SingleClassLoaderResolver;
 import saker.nest.bundle.BundleIdentifier;
 import saker.nest.bundle.BundleInformation;
-import saker.nest.bundle.SimpleExternalArchiveKey;
-import saker.nest.jdkutil.JavaToolsModulePatcher;
 import saker.nest.bundle.NestRepositoryBundleClassLoader;
 import saker.nest.bundle.NestRepositoryBundleClassLoader.DependentClassLoader;
 import saker.nest.bundle.NestRepositoryExternalArchiveClassLoader;
+import saker.nest.bundle.SimpleExternalArchiveKey;
+import saker.nest.jdkutil.JavaToolsModulePatcher;
 import saker.nest.scriptinfo.reflection.ReflectionExternalScriptInformationProvider;
 import saker.nest.thirdparty.org.json.JSONObject;
 import saker.nest.thirdparty.org.json.JSONTokener;
 import testing.saker.nest.TestFlag;
 
 public class NestBuildRepositoryImpl implements BuildRepository {
-	private static final String CLASSLOADER_ID_SAKER_NEST_JDK_COMPILER_OPEN = "saker.nest."
-			+ BundleInformation.SPECIAL_CLASSPATH_DEPENDENCY_JDK_COMPILER_OPEN;
-
 	private final RepositoryBuildEnvironment environment;
 
 	private final ConfiguredRepositoryStorage configuredStorage;
@@ -144,28 +141,7 @@ public class NestBuildRepositoryImpl implements BuildRepository {
 	 * <code>null</code> if not applicable as we're running on JDK 8.
 	 */
 	private static final ClassLoaderResolver jdkCompilerOpenedClassLoaderResolver = JavaToolsModulePatcher
-			.isDifferentFromDefaultJavaToolsClassLoader() ? new ClassLoaderResolver() {
-
-				@Override
-				public String getClassLoaderIdentifier(ClassLoader classloader) {
-					if (classloader == JavaToolsModulePatcher.getJavaToolsClassLoaderIfLoaded()) {
-						return CLASSLOADER_ID_SAKER_NEST_JDK_COMPILER_OPEN;
-					}
-					return null;
-				}
-
-				@Override
-				public ClassLoader getClassLoaderForIdentifier(String identifier) {
-					if (CLASSLOADER_ID_SAKER_NEST_JDK_COMPILER_OPEN.equals(identifier)) {
-						try {
-							return JavaToolsModulePatcher.getJavaToolsClassLoader();
-						} catch (IOException e) {
-							//TODO log the error for build trace or something
-						}
-					}
-					return null;
-				}
-			} : null;
+			.getClassLoaderResolver();
 
 	public static NestBuildRepositoryImpl create(NestRepositoryImpl nestRepository,
 			RepositoryBuildEnvironment environment) {

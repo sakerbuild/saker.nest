@@ -31,7 +31,7 @@ import java.util.Collections;
 import java.util.Optional;
 import java.util.Set;
 
-import com.sun.source.util.Trees;
+import saker.build.thirdparty.saker.util.classloader.ClassLoaderResolver;
 
 public class JavaToolsModulePatcher {
 	private static final String MODULE_NAME_JDK_COMPILER = "jdk.compiler";
@@ -42,6 +42,10 @@ public class JavaToolsModulePatcher {
 
 	//throws IOException for compatibility with Java 8 version
 	public static ClassLoader getJavaToolsClassLoader() throws IOException {
+		return getJavaToolsClassLoaderImpl();
+	}
+
+	static ClassLoader getJavaToolsClassLoaderImpl() throws AssertionError {
 		ClassLoader result = JAVA_TOOLS_CLASSLOADER;
 		if (result != null) {
 			return result;
@@ -57,12 +61,16 @@ public class JavaToolsModulePatcher {
 		}
 	}
 
-	public static ClassLoader getJavaToolsClassLoaderIfLoaded() {
+	static ClassLoader getJavaToolsClassLoaderIfLoaded() {
 		return JAVA_TOOLS_CLASSLOADER;
 	}
 
 	public static boolean isDifferentFromDefaultJavaToolsClassLoader() {
 		return true;
+	}
+
+	public static ClassLoaderResolver getClassLoaderResolver() {
+		return PatchedModuleClassLoaderResolver.INSTANCE;
 	}
 
 	private static volatile ClassLoader JAVA_TOOLS_CLASSLOADER = createJavaToolsClassLoader();
@@ -71,7 +79,8 @@ public class JavaToolsModulePatcher {
 		//open module so everyone can access it
 		ModuleDescriptor.Builder njdkbuilder = ModuleDescriptor.newModule(MODULE_NAME_JDK_COMPILER,
 				Collections.singleton(Modifier.OPEN));
-		ModuleDescriptor jdkcompilerdescriptor = Trees.class.getModule().getDescriptor();
+		ModuleDescriptor jdkcompilerdescriptor = ModuleLayer.boot().findModule(MODULE_NAME_JDK_COMPILER).get()
+				.getDescriptor();
 		for (Provides p : jdkcompilerdescriptor.provides()) {
 			njdkbuilder.provides(p);
 		}
@@ -126,4 +135,25 @@ public class JavaToolsModulePatcher {
 		return newjdkcompilermodule.getClassLoader();
 	}
 
+	private static enum PatchedModuleClassLoaderResolver implements ClassLoaderResolver {
+		INSTANCE;
+
+		private static final String CLASSLOADER_IDENTIFIER = "saker.nest.jdk.compiler-open";
+
+		@Override
+		public String getClassLoaderIdentifier(ClassLoader classloader) {
+			if (classloader == getJavaToolsClassLoaderIfLoaded()) {
+				return CLASSLOADER_IDENTIFIER;
+			}
+			return null;
+		}
+
+		@Override
+		public ClassLoader getClassLoaderForIdentifier(String identifier) {
+			if (CLASSLOADER_IDENTIFIER.equals(identifier)) {
+				return getJavaToolsClassLoaderImpl();
+			}
+			return null;
+		}
+	}
 }

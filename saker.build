@@ -71,7 +71,8 @@ compile(
 		Identifier: jdk9-util,
 		SDKs: {
 			Java: saker.java.sdk(9)
-		}
+		},
+		ClassPath: $testapicompile,
 		CompilerOptions: $buildconfig[JavaCompilerOptions],
 	)
 }
