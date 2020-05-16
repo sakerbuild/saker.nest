@@ -68,7 +68,7 @@ compile(
 	)
 	$jdk9util = saker.java.compile(
 		SourceDirectories: jdkutil/jdk9/,
-		Identifier: jdk9-util,
+		Identifier: "jdk9-util{ $buildconfig[TestingId] }{ $buildconfig[ApiDocId] }",
 		SDKs: {
 			Java: saker.java.sdk(9)
 		},
