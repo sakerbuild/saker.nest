@@ -17,6 +17,9 @@ package saker.nest.bundle;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -31,6 +34,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentSkipListMap;
 
+import saker.build.thirdparty.saker.util.ConcurrentPrependAccumulator;
 import saker.build.thirdparty.saker.util.ImmutableUtils;
 import saker.build.thirdparty.saker.util.StringUtils;
 import saker.build.thirdparty.saker.util.TransformingMap;
@@ -109,6 +113,15 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 
 	private final LazySupplier<byte[]> hashWithClassPathDependencies = LazySupplier
 			.of(this::computeHashWithClassPathDependencies);
+
+	/**
+	 * Holds references to the opened lock files for the native libraries that are loaded.
+	 * <p>
+	 * This accumulator is <b>never</b> cleared. The locks in it are freed by the JVM when the classloader is unloaded.
+	 * The unloading of the classloader also causes the native libraries to be unloaded. The locks will be released by
+	 * the finalizer, or common cleaner.
+	 */
+	private final ConcurrentPrependAccumulator<LoadedLibraryFileLockReference> loadedLibFileReferences = new ConcurrentPrependAccumulator<>();
 
 	public NestRepositoryBundleClassLoader(ClassLoader parent, ConfiguredRepositoryStorage configuredStorage,
 			BundleKey bundlekey, AbstractNestRepositoryBundle bundle,
@@ -411,6 +424,32 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 			//XXX maybe we should do file-system level locking to deal with concurrent processes as well
 			synchronized (("nest-lib-load-lock:" + libpath).intern()) {
 				Files.createDirectories(libdirpath);
+				FileChannel lockchannel;
+				FileLock lock;
+				for (int i = 0;; ++i) {
+					String ihexstr = Integer.toHexString(i);
+					Path lockfilepath = libpath.resolveSibling(ihexstr + "_" + libpath.getFileName() + ".lock");
+					lockchannel = FileChannel.open(lockfilepath, StandardOpenOption.CREATE, StandardOpenOption.READ,
+							StandardOpenOption.WRITE);
+					try {
+						lock = lockchannel.tryLock();
+						if (lock == null) {
+							lockchannel.close();
+							continue;
+						}
+						//locked the access for the dll with the given id
+						//we can proceed loading it
+						libpath = libpath.resolveSibling(ihexstr + "_" + libpath.getFileName());
+						loadedLibFileReferences.add(new LoadedLibraryFileLockReference(lockchannel, lock));
+						break;
+					} catch (OverlappingFileLockException e) {
+						continue;
+					} catch (IOException e) {
+						IOUtils.closeExc(e, lockchannel);
+						throw e;
+					}
+
+				}
 				if (getFileSizeOrNegative(libpath) != bytes.getLength()) {
 					Path temppath = libpath.resolveSibling(UUID.randomUUID() + ".templib");
 					try {
@@ -424,6 +463,7 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 							Files.deleteIfExists(temppath);
 						} catch (IOException ignored) {
 							e.addSuppressed(ignored);
+							IOUtils.addExc(e, IOUtils.closeExc(lock, lockchannel));
 						}
 						throw e;
 					}
@@ -476,5 +516,18 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 				collectBundleHashesImpl(depcl.classLoader, result);
 			}
 		}
+	}
+
+	@SuppressWarnings("unused")
+	//suppress unused warnings as the fields are just strong references to the objects
+	private static class LoadedLibraryFileLockReference {
+		private final FileChannel fc;
+		private final FileLock lock;
+
+		public LoadedLibraryFileLockReference(FileChannel fc, FileLock lock) {
+			this.fc = fc;
+			this.lock = lock;
+		}
+
 	}
 }

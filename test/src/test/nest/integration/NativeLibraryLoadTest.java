@@ -63,13 +63,22 @@ public class NativeLibraryLoadTest extends ManualLoadedRepositoryTestCase {
 		repo.executeAction("main", "-Unest.server.offline=true",
 				NestIntegrationTestUtils.createParameterBundlesUserParameter(bundleclasses.keySet(), bundleoutdir),
 				"-bundle", "simple.bundle-v1");
+		assertEquals(System.clearProperty(PROPERTY_NAME), "lib-loaded-" + System.getProperty("os.arch"));
 
+		//try once more to check that a single library can be loaded multiple times in different classloaders
+		repo.executeAction("main", "-Unest.server.offline=true",
+				NestIntegrationTestUtils.createParameterBundlesUserParameter(bundleclasses.keySet(), bundleoutdir),
+				"-bundle", "simple.bundle-v1");
 		assertEquals(System.clearProperty(PROPERTY_NAME), "lib-loaded-" + System.getProperty("os.arch"));
 
 		repo.executeAction("main", "-Unest.server.offline=true", "-Unest.repository.constraint.force.architecture=null",
 				NestIntegrationTestUtils.createParameterBundlesUserParameter(bundleclasses.keySet(), bundleoutdir),
 				"-bundle", "simple.bundle-v1");
+		assertEquals(System.clearProperty(PROPERTY_NAME), "lib-loaded");
 
+		repo.executeAction("main", "-Unest.server.offline=true", "-Unest.repository.constraint.force.architecture=null",
+				NestIntegrationTestUtils.createParameterBundlesUserParameter(bundleclasses.keySet(), bundleoutdir),
+				"-bundle", "simple.bundle-v1");
 		assertEquals(System.clearProperty(PROPERTY_NAME), "lib-loaded");
 	}
 }
