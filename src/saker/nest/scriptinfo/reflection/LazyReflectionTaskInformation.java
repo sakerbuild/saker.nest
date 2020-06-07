@@ -38,7 +38,14 @@ public class LazyReflectionTaskInformation implements TaskInformation {
 				infoSupplier = Functionals.nullSupplier();
 				return null;
 			}
-			Class<?> taskclass = repo.getTaskClassForInformationProvider(taskname);
+			Class<?> taskclass;
+			try {
+				taskclass = repo.getTaskClassForInformationProvider(taskname);
+			} catch (Exception e) {
+				//the class may've failed to load
+				e.printStackTrace();
+				return null;
+			}
 			if (taskclass == null) {
 				return null;
 			}

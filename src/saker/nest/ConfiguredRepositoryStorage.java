@@ -127,13 +127,14 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 		DEFAULT_STORAGE_NAME_TYPES.put(STORAGE_TYPE_LOCAL, STORAGE_TYPE_LOCAL);
 		DEFAULT_STORAGE_NAME_TYPES.put(STORAGE_TYPE_SERVER, STORAGE_TYPE_SERVER);
 	}
-	private static final Set<String> STORAGE_CONFIGURATION_TYPES = DEFAULT_STORAGE_NAME_TYPES.keySet();
+	private static final NavigableSet<String> STORAGE_CONFIGURATION_TYPES = ImmutableUtils.makeImmutableNavigableSet(
+			new String[] { STORAGE_TYPE_PARAMETER, STORAGE_TYPE_LOCAL, STORAGE_TYPE_SERVER, });
 
-	private static final Set<String> RESERVED_STORAGE_NAMES = ImmutableUtils
+	private static final NavigableSet<String> RESERVED_STORAGE_NAMES = ImmutableUtils
 			.makeImmutableNavigableSet(new String[] { "all", "repository" });
 
-	private static final Set<String> CLASSPATH_DEPENDENCY_KIND_SINGLETON = Collections
-			.singleton(BundleInformation.DEPENDENCY_KIND_CLASSPATH);
+	private static final NavigableSet<String> CLASSPATH_DEPENDENCY_KIND_SINGLETON = ImmutableUtils
+			.singletonNavigableSet(BundleInformation.DEPENDENCY_KIND_CLASSPATH);
 
 	private static final Pattern PATTERN_SEMICOLON_SPACES_SPLIT = Pattern.compile("[; \\t]+");
 
