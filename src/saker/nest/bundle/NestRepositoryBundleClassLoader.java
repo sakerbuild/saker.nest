@@ -421,7 +421,6 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 				libdirpath = libpath.getParent();
 			}
 			//lock on a vm-common string for the library path to avoid concurrent loading
-			//XXX maybe we should do file-system level locking to deal with concurrent processes as well
 			synchronized (("nest-lib-load-lock:" + libpath).intern()) {
 				Files.createDirectories(libdirpath);
 				FileChannel lockchannel;
@@ -432,6 +431,7 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 					lockchannel = FileChannel.open(lockfilepath, StandardOpenOption.CREATE, StandardOpenOption.READ,
 							StandardOpenOption.WRITE);
 					try {
+						//non shared lock on the whole file
 						lock = lockchannel.tryLock();
 						if (lock == null) {
 							lockchannel.close();
@@ -443,9 +443,12 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 						loadedLibFileReferences.add(new LoadedLibraryFileLockReference(lockchannel, lock));
 						break;
 					} catch (OverlappingFileLockException e) {
+						//a lock is already held by the current VM.
+						//close the channel anyway
+						IOUtils.close(lockchannel);
 						continue;
-					} catch (IOException e) {
-						IOUtils.closeExc(e, lockchannel);
+					} catch (Throwable e) {
+						IOUtils.addExc(e, IOUtils.closeExc(lockchannel));
 						throw e;
 					}
 
@@ -463,8 +466,8 @@ public final class NestRepositoryBundleClassLoader extends MultiDataClassLoader 
 							Files.deleteIfExists(temppath);
 						} catch (IOException ignored) {
 							e.addSuppressed(ignored);
-							IOUtils.addExc(e, IOUtils.closeExc(lock, lockchannel));
 						}
+						IOUtils.addExc(e, IOUtils.closeExc(lock, lockchannel));
 						throw e;
 					}
 				}
