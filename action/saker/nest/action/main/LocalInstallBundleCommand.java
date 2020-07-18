@@ -123,9 +123,8 @@ public class LocalInstallBundleCommand {
 			System.out.println("No bundles found.");
 			return;
 		}
-		try (ConfiguredRepositoryStorage configuredstorage = new ConfiguredRepositoryStorage(execute.repository,
-				repositoryId, ExecutionPathConfiguration.local(SakerPath.valueOf(System.getProperty("user.dir"))),
-				userParameters)) {
+		try (ConfiguredRepositoryStorage configuredstorage = ConfiguredRepositoryStorage.forRepositoryAction(
+				execute.repository, repositoryId, ExecutionPathConfiguration.local(workingdir), userParameters)) {
 			Map<String, ? extends LocalBundleStorageView> localstorages = configuredstorage.getLocalStorages();
 			LocalBundleStorageView installstorage = localstorages.get(storage);
 			if (installstorage == null) {

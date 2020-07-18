@@ -49,7 +49,10 @@ import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 import saker.build.file.path.WildcardPath;
+import saker.build.file.provider.LocalFileProvider;
+import saker.build.file.provider.SakerFileProvider;
 import saker.build.runtime.params.ExecutionPathConfiguration;
+import saker.build.runtime.repository.RepositoryBuildEnvironment;
 import saker.build.runtime.repository.TaskNotFoundException;
 import saker.build.task.TaskFactory;
 import saker.build.task.TaskName;
@@ -101,6 +104,8 @@ import saker.nest.bundle.storage.LocalBundleStorageView;
 import saker.nest.bundle.storage.ParameterBundleStorage;
 import saker.nest.bundle.storage.ParameterBundleStorageView;
 import saker.nest.bundle.storage.ServerBundleStorage;
+import saker.nest.bundle.storage.StorageSharedObjectAccessor;
+import saker.nest.bundle.storage.StorageViewEnvironment;
 import saker.nest.bundle.storage.StorageViewKey;
 import saker.nest.dependency.DependencyDomainResolutionResult;
 import saker.nest.dependency.DependencyResolutionLogger;
@@ -163,8 +168,32 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 	private final Object detectChangeLock = new Object();
 	private DetectedChanges expectedDetectedChanges;
 
-	public ConfiguredRepositoryStorage(NestRepositoryImpl repository, String repoid,
+	public static ConfiguredRepositoryStorage forBuildRepository(NestRepositoryImpl nestRepository,
+			RepositoryBuildEnvironment environment) {
+		SakerFileProvider localfp;
+		boolean remotecluster;
+		if (saker.build.meta.Versions.VERSION_FULL_COMPOUND >= 8_015) {
+			localfp = environment.getLocalFileProvider();
+			remotecluster = environment.isRemoteCluster();
+		} else {
+			localfp = LocalFileProvider.getInstance();
+			remotecluster = false;
+		}
+		return new ConfiguredRepositoryStorage(nestRepository, environment.getIdentifier(),
+				environment.getPathConfiguration(), environment.getUserParameters(),
+				new RepositoryBuildEnvironmentStorageSharedObjectAccessor(environment), remotecluster, localfp);
+	}
+
+	public static ConfiguredRepositoryStorage forRepositoryAction(NestRepositoryImpl repository, String repoid,
 			ExecutionPathConfiguration pathconfig, Map<String, String> parameters) {
+		return new ConfiguredRepositoryStorage(repository, repoid, pathconfig, parameters,
+				StorageSharedObjectAccessor.NULL_ACCESSOR, false, LocalFileProvider.getInstance());
+	}
+
+	private ConfiguredRepositoryStorage(NestRepositoryImpl repository, String repoid,
+			ExecutionPathConfiguration pathconfig, Map<String, String> parameters,
+			StorageSharedObjectAccessor sharedobjecthandler, boolean remotecluster,
+			SakerFileProvider localfileprovider) {
 		this.repository = repository;
 
 		final Integer classPathJreMajorVersion;
@@ -277,38 +306,39 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 							paramentry.getValue());
 				}
 			}
+			StorageInitializationInfo initinfo;
 			switch (entry.getValue()) {
 				case STORAGE_TYPE_LOCAL: {
-					namedstorageinitializers.put(storagename,
-							new StorageInitializationInfo(
-									LocalBundleStorage.LocalStorageKey.create(repository, storageuserparams),
-									storageuserparams));
+					initinfo = new StorageInitializationInfo(
+							LocalBundleStorage.LocalStorageKey.create(repository, storageuserparams),
+							storageuserparams);
 					break;
 				}
 				case STORAGE_TYPE_PARAMETER: {
-					namedstorageinitializers.put(storagename,
-							new StorageInitializationInfo(
-									ParameterBundleStorage.ParameterStorageKey.create(repository, storageuserparams),
-									storageuserparams));
+					initinfo = new StorageInitializationInfo(
+							ParameterBundleStorage.ParameterStorageKey.create(repository, storageuserparams),
+							storageuserparams);
 					break;
 				}
 				case STORAGE_TYPE_SERVER: {
-					namedstorageinitializers.put(storagename,
-							new StorageInitializationInfo(
-									ServerBundleStorage.ServerStorageKey.create(repository, storageuserparams),
-									storageuserparams));
+					initinfo = new StorageInitializationInfo(
+							ServerBundleStorage.ServerStorageKey.create(repository, storageuserparams),
+							storageuserparams);
 					break;
 				}
 				default: {
 					throw new AssertionError("Unknown storage type: " + entry.getValue());
 				}
 			}
+			namedstorageinitializers.put(storagename, initinfo);
 		}
 		for (Entry<String, StorageInitializationInfo> entry : namedstorageinitializers.entrySet()) {
+			String storageviewname = entry.getKey();
 			StorageInitializationInfo initinfo = entry.getValue();
 
 			AbstractBundleStorage storage = repository.loadStorage(initinfo.storageKey);
-			AbstractBundleStorageView storageview = storage.newStorageView(initinfo.userParameters, pathconfig);
+			AbstractBundleStorageView storageview = storage.newStorageView(new StorageViewEnvironmentImpl(pathconfig,
+					sharedobjecthandler, remotecluster, initinfo.userParameters, storageviewname, localfileprovider));
 
 			String storageviewstringid = createStorageViewStringIdentifier(storageview);
 
@@ -992,6 +1022,86 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 	private NestRepositoryBundleClassLoader getBundleClassLoader(TaskLookupInfo tasklookup) {
 		return getBundleClassLoader((AbstractNestRepositoryBundle) tasklookup.getBundle(),
 				tasklookup.getLookupConfiguration(), tasklookup.getStorageView());
+	}
+
+	private final class StorageViewEnvironmentImpl implements StorageViewEnvironment {
+		private final ExecutionPathConfiguration pathconfig;
+		private final StorageSharedObjectAccessor sharedobjecthandler;
+		private final boolean remotecluster;
+		private final NavigableMap<String, String> userParameters;
+		private final String storageviewname;
+		private final SakerFileProvider localFileProvider;
+
+		public StorageViewEnvironmentImpl(ExecutionPathConfiguration pathconfig,
+				StorageSharedObjectAccessor sharedobjecthandler, boolean remotecluster,
+				NavigableMap<String, String> userParameters, String storageviewname,
+				SakerFileProvider localFileProvider) {
+			this.pathconfig = pathconfig;
+			this.sharedobjecthandler = sharedobjecthandler;
+			this.remotecluster = remotecluster;
+			this.userParameters = userParameters;
+			this.storageviewname = storageviewname;
+			this.localFileProvider = localFileProvider;
+		}
+
+		@Override
+		public void setSharedObject(Object key, Object value) {
+			if (saker.build.meta.Versions.VERSION_FULL_COMPOUND >= 8_015) {
+				sharedobjecthandler.setSharedObject(key, value);
+			}
+		}
+
+		@Override
+		public Object getSharedObject(Object key) {
+			if (saker.build.meta.Versions.VERSION_FULL_COMPOUND >= 8_015) {
+				return sharedobjecthandler.getSharedObject(key);
+			}
+			return null;
+		}
+
+		@Override
+		public boolean isRemoteCluster() {
+			return remotecluster;
+		}
+
+		@Override
+		public NavigableMap<String, String> getUserParameters() {
+			return userParameters;
+		}
+
+		@Override
+		public String getStorageViewName() {
+			return storageviewname;
+		}
+
+		@Override
+		public ExecutionPathConfiguration getPathConfiguration() {
+			return pathconfig;
+		}
+
+		@Override
+		public SakerFileProvider getLocalFileProvider() {
+			return localFileProvider;
+		}
+	}
+
+	private static final class RepositoryBuildEnvironmentStorageSharedObjectAccessor
+			implements StorageSharedObjectAccessor {
+		private final RepositoryBuildEnvironment environment;
+
+		private RepositoryBuildEnvironmentStorageSharedObjectAccessor(RepositoryBuildEnvironment environment) {
+			this.environment = environment;
+		}
+
+		@Override
+		public void setSharedObject(Object key, Object value) {
+			environment.setSharedObject(key, value);
+		}
+
+		@Override
+		public Object getSharedObject(Object key) {
+			return environment.getSharedObject(key);
+		}
 	}
 
 	private static class ClassLoaderDependencyResolutionBundleContext {

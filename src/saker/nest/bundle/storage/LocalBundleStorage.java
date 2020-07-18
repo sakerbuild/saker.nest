@@ -42,6 +42,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -69,10 +70,21 @@ import saker.build.file.provider.RootFileProviderKey;
 import saker.build.runtime.params.ExecutionPathConfiguration;
 import saker.build.runtime.repository.TaskNotFoundException;
 import saker.build.task.TaskName;
+import saker.build.task.identifier.TaskIdentifier;
+import saker.build.thirdparty.saker.rmi.annot.invoke.RMICacheResult;
+import saker.build.thirdparty.saker.rmi.annot.transfer.RMISerialize;
+import saker.build.thirdparty.saker.rmi.annot.transfer.RMIWrap;
+import saker.build.thirdparty.saker.rmi.annot.transfer.RMIWriter;
+import saker.build.thirdparty.saker.rmi.io.RMIObjectInput;
+import saker.build.thirdparty.saker.rmi.io.RMIObjectOutput;
+import saker.build.thirdparty.saker.rmi.io.wrap.RMIWrapper;
+import saker.build.thirdparty.saker.rmi.io.writer.RemoteRMIObjectWriteHandler;
 import saker.build.thirdparty.saker.util.ConcurrentPrependAccumulator;
 import saker.build.thirdparty.saker.util.ImmutableUtils;
 import saker.build.thirdparty.saker.util.ObjectUtils;
+import saker.build.thirdparty.saker.util.StringUtils;
 import saker.build.thirdparty.saker.util.function.Functionals;
+import saker.build.thirdparty.saker.util.io.ByteSink;
 import saker.build.thirdparty.saker.util.io.FileUtils;
 import saker.build.thirdparty.saker.util.io.IOUtils;
 import saker.build.thirdparty.saker.util.io.MultiplexOutputStream;
@@ -80,6 +92,7 @@ import saker.build.thirdparty.saker.util.io.SerialUtils;
 import saker.build.thirdparty.saker.util.io.StreamUtils;
 import saker.build.thirdparty.saker.util.io.UnsyncBufferedInputStream;
 import saker.build.thirdparty.saker.util.io.UnsyncBufferedOutputStream;
+import saker.build.thirdparty.saker.util.rmi.wrap.RMITreeSetSerializeElementWrapper;
 import saker.nest.ConfiguredRepositoryStorage;
 import saker.nest.NestRepositoryImpl;
 import saker.nest.bundle.AbstractNestRepositoryBundle;
@@ -89,6 +102,7 @@ import saker.nest.bundle.BundleUtils;
 import saker.nest.bundle.ExternalArchive;
 import saker.nest.bundle.ExternalArchiveKey;
 import saker.nest.bundle.ExternalDependencyInformation;
+import saker.nest.bundle.JarNestRepositoryBundle;
 import saker.nest.bundle.JarNestRepositoryBundleImpl;
 import saker.nest.bundle.NestRepositoryBundle;
 import saker.nest.bundle.storage.LocalBundleStorageView.InstallResult;
@@ -96,8 +110,12 @@ import saker.nest.exc.BundleLoadingFailedException;
 import saker.nest.exc.BundleStorageInitializationException;
 import saker.nest.exc.ExternalArchiveLoadingFailedException;
 import saker.nest.exc.InvalidNestBundleException;
+import testing.saker.nest.TestFlag;
 
 public class LocalBundleStorage extends AbstractBundleStorage {
+	private static final Comparator<String> COMPARATOR_REVERSE_VERSION_NUMBER = Collections
+			.reverseOrder(BundleIdentifier::compareVersionNumbers);
+
 	public static class LocalStorageKey extends AbstractStorageKey implements Externalizable {
 		private static final long serialVersionUID = 1L;
 
@@ -111,23 +129,23 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 		public LocalStorageKey() {
 		}
 
-		private LocalStorageKey(Path storageDirectory) {
+		private LocalStorageKey(SakerPath storageDirectory) {
 			this.fileProviderKey = LocalFileProvider.getProviderKeyStatic();
-			this.storageDirectory = SakerPath.valueOf(storageDirectory);
+			this.storageDirectory = storageDirectory;
 		}
 
 		public static AbstractStorageKey create(NestRepositoryImpl repository, Map<String, String> userparams) {
 			String rootparam = userparams.get(LocalBundleStorageView.PARAMETER_ROOT);
-			Path storagedir;
+			SakerPath storagedir;
 			if (rootparam == null) {
-				storagedir = repository.getRepositoryStorageDirectory()
-						.resolve(LocalBundleStorageView.DEFAULT_STORAGE_NAME);
+				storagedir = SakerPath.valueOf(repository.getRepositoryStorageDirectory()
+						.resolve(LocalBundleStorageView.DEFAULT_STORAGE_NAME));
 			} else {
 				Path rootpath = Paths.get(rootparam);
 				if (!rootpath.isAbsolute()) {
 					rootpath = repository.getRepositoryStorageDirectory().resolve(rootpath);
 				}
-				storagedir = rootpath;
+				storagedir = SakerPath.valueOf(rootpath);
 			}
 			return new LocalStorageKey(storagedir);
 		}
@@ -145,8 +163,8 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 
 		@Override
 		public void readExternal(ObjectInput in) throws IOException, ClassNotFoundException {
-			fileProviderKey = (RootFileProviderKey) in.readObject();
-			storageDirectory = (SakerPath) in.readObject();
+			fileProviderKey = SerialUtils.readExternalObject(in);
+			storageDirectory = SerialUtils.readExternalObject(in);
 		}
 
 		@Override
@@ -185,7 +203,6 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 			return getClass().getSimpleName() + "["
 					+ (storageDirectory != null ? "storageDirectory=" + storageDirectory : "") + "]";
 		}
-
 	}
 
 	private static final String BUNDLES_DIRECTORY_NAME = "bundles";
@@ -216,6 +233,10 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 
 	private final ConcurrentNavigableMap<BundleIdentifier, Object> bundleLoadLocks = new ConcurrentSkipListMap<>();
 	private final ConcurrentNavigableMap<BundleIdentifier, AbstractNestRepositoryBundle> loadedBundles = new ConcurrentSkipListMap<>();
+
+	private final ConcurrentNavigableMap<BundleHashKey, Object> remoteBundleLoadLocks = new ConcurrentSkipListMap<>();
+	private final ConcurrentNavigableMap<BundleHashKey, AbstractNestRepositoryBundle> remoteLoadedBundles = new ConcurrentSkipListMap<>();
+
 	//XXX make this use weak references, and run a collector GC thread for cleaning up
 	private final ConcurrentPrependAccumulator<AbstractNestRepositoryBundle> allLoadedBundles = new ConcurrentPrependAccumulator<>();
 
@@ -223,6 +244,7 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 	private final ConcurrentNavigableMap<BundleIdentifier, PendingBundleInfoState> pendingBundleInfoStates = new ConcurrentSkipListMap<>();
 
 	private final Object detectChangeLock = new Object();
+	private UUID storageStateIdentity = UUID.randomUUID();
 	private final NestRepositoryImpl repository;
 
 	public LocalBundleStorage(LocalStorageKey storagekey, NestRepositoryImpl repository) {
@@ -236,6 +258,7 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 		Path infofiletmp = bundlesDirectory.resolve("storage.info");
 
 		FileChannel channeltoclose = null;
+		Throwable exc = null;
 		try {
 			Files.createDirectories(bundlesDirectory);
 			channeltoclose = FileChannel.open(infofiletmp, StandardOpenOption.CREATE, StandardOpenOption.WRITE,
@@ -245,10 +268,24 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 			initializeFromConstructor(channeltoclose);
 			channeltoclose = null;
 		} catch (IOException e) {
-			throw new BundleStorageInitializationException("Failed to initialize storage at: " + storageDirectory, e);
+			BundleStorageInitializationException initexc = new BundleStorageInitializationException(
+					"Failed to initialize storage at: " + storageDirectory, e);
+			exc = initexc;
+			throw initexc;
+		} catch (Throwable e) {
+			exc = e;
+			throw e;
 		} finally {
 			//if the locking fails, we need to close the opened channel
-			IOUtils.closePrint(channeltoclose);
+			IOException closeexc = IOUtils.closeExc(channeltoclose);
+			if (closeexc != null) {
+				if (exc == null) {
+					throw new BundleStorageInitializationException(
+							"Failed to initialize storage at: " + storageDirectory, closeexc);
+				} else {
+					exc.addSuppressed(closeexc);
+				}
+			}
 		}
 	}
 
@@ -274,12 +311,32 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 	}
 
 	@Override
-	public AbstractBundleStorageView newStorageView(Map<String, String> userparameters,
-			ExecutionPathConfiguration pathconfig) {
+	public AbstractBundleStorageView newStorageView(StorageViewEnvironment viewenvironment) {
+		Object sharedaccesskey = null;
+		boolean remotecluster = false;
+		if (saker.build.meta.Versions.VERSION_FULL_COMPOUND >= 8_015) {
+			sharedaccesskey = getSharedAccessKey(repository, viewenvironment.getUserParameters());
+			remotecluster = viewenvironment.isRemoteCluster();
+			if (remotecluster) {
+				LocalStorageSharedAccessor accessor = (LocalStorageSharedAccessor) viewenvironment
+						.getSharedObject(sharedaccesskey);
+				if (TestFlag.ENABLED && accessor == null) {
+					throw new AssertionError(sharedaccesskey);
+				}
+				return new RemoteMirrorLocalBundleStorageViewImpl(viewenvironment, sharedaccesskey);
+			}
+		}
+		LocalBundleStorageViewImpl result;
 		synchronized (detectChangeLock) {
 			discoverPendingBundles(reduceInterestedPendingBundles(getPendingBundles()));
-			return new LocalBundleStorageViewImpl();
+			result = new LocalBundleStorageViewImpl();
 		}
+		if (saker.build.meta.Versions.VERSION_FULL_COMPOUND >= 8_015) {
+			if (!remotecluster) {
+				viewenvironment.setSharedObject(sharedaccesskey, new LocalStorageSharedAccessorImpl(result));
+			}
+		}
+		return result;
 	}
 
 	@Override
@@ -691,6 +748,7 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 		if (reducedpendingbundles.isEmpty()) {
 			return;
 		}
+		storageStateIdentity = UUID.randomUUID();
 		for (Entry<BundleIdentifier, Entry<Integer, Path>> entry : reducedpendingbundles.entrySet()) {
 			BundleIdentifier entrybundleid = entry.getKey();
 			PendingBundleInfoState currentinfostate = pendingBundleInfoStates.get(entrybundleid);
@@ -796,6 +854,229 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 			tnames.add(tn.getName());
 		}
 		return tnames;
+	}
+
+	private static Object getSharedAccessKey(NestRepositoryImpl repository, Map<String, String> userparams) {
+		String rootparam = userparams.get(LocalBundleStorageView.PARAMETER_ROOT);
+		SakerPath accesskeypath;
+		if (rootparam == null) {
+			accesskeypath = null;
+		} else {
+			Path rootpath = Paths.get(rootparam);
+			if (!rootpath.isAbsolute()) {
+				rootpath = repository.getRepositoryStorageDirectory().resolve(rootpath);
+			}
+			accesskeypath = SakerPath.valueOf(rootpath);
+		}
+
+		// use a type that can be serialized and deserialized independently from repository classes
+		return TaskIdentifier.builder(LocalBundleStorage.class.getName()).field("scope", "remote-accessor")
+				.field("path", accesskeypath).build();
+	}
+
+	private static void updateHashWithStorageKey(MessageDigest digest, LocalStorageKey storagekey) {
+		digest.update((ConfiguredRepositoryStorage.STORAGE_TYPE_LOCAL + ":(" + storagekey.fileProviderKey.getUUID()
+				+ ":" + storagekey.storageDirectory + ")").getBytes(StandardCharsets.UTF_8));
+	}
+
+	public static class BundleHashKey implements Externalizable, Comparable<BundleHashKey> {
+		private static final long serialVersionUID = 1L;
+
+		protected BundleIdentifier bundleId;
+		protected String hash;
+
+		/**
+		 * For {@link Externalizable}.
+		 */
+		public BundleHashKey() {
+		}
+
+		public BundleHashKey(BundleIdentifier bundleId, String hash) {
+			this.bundleId = bundleId;
+			this.hash = hash;
+		}
+
+		public BundleHashKey(NestRepositoryBundle bundle) {
+			this(bundle.getBundleIdentifier(), StringUtils.toHexString(bundle.getHash()));
+		}
+
+		@Override
+		public int compareTo(BundleHashKey o) {
+			int cmp = bundleId.compareTo(o.bundleId);
+			if (cmp != 0) {
+				return cmp;
+			}
+			cmp = this.hash.compareTo(o.hash);
+			return cmp;
+		}
+
+		@Override
+		public void writeExternal(ObjectOutput out) throws IOException {
+			out.writeObject(bundleId);
+			out.writeObject(hash);
+		}
+
+		@Override
+		public void readExternal(ObjectInput in) throws IOException, ClassNotFoundException {
+			bundleId = SerialUtils.readExternalObject(in);
+			hash = SerialUtils.readExternalObject(in);
+		}
+
+		@Override
+		public int hashCode() {
+			final int prime = 31;
+			int result = 1;
+			result = prime * result + ((bundleId == null) ? 0 : bundleId.hashCode());
+			result = prime * result + ((hash == null) ? 0 : hash.hashCode());
+			return result;
+		}
+
+		@Override
+		public boolean equals(Object obj) {
+			if (this == obj)
+				return true;
+			if (obj == null)
+				return false;
+			if (getClass() != obj.getClass())
+				return false;
+			BundleHashKey other = (BundleHashKey) obj;
+			if (bundleId == null) {
+				if (other.bundleId != null)
+					return false;
+			} else if (!bundleId.equals(other.bundleId))
+				return false;
+			if (hash == null) {
+				if (other.hash != null)
+					return false;
+			} else if (!hash.equals(other.hash))
+				return false;
+			return true;
+		}
+
+		@Override
+		public String toString() {
+			return "BundleHashKey[" + bundleId + " : " + hash + "]";
+		}
+
+	}
+
+	public interface LocalStorageSharedAccessor {
+		public InstallResult install(StreamWritable bundlecontents)
+				throws NullPointerException, IOException, UnsupportedOperationException, InvalidNestBundleException;
+
+		@RMICacheResult
+		public LocalStorageKey getLocalStorageKey();
+
+		@RMISerialize
+		public UUID getStorageState();
+
+		@RMIWrap(RMITreeSetSerializeElementWrapper.class)
+		public Set<? extends BundleIdentifier> lookupBundleVersions(BundleIdentifier bundleid);
+
+		@RMIWrap(BundleIdentifierVersionMapRMIWrapper.class)
+		public Map<String, ? extends NavigableSet<? extends BundleIdentifier>> lookupBundleIdentifiers(
+				String bundlename);
+
+		public BundleHashKey lookupTaskBundle(TaskName taskname)
+				throws NullPointerException, TaskNotFoundException, IOException;
+
+		public BundleHashKey getBundleHash(BundleIdentifier bundle)
+				throws NullPointerException, BundleLoadingFailedException;
+
+		public void writeBundleContentsTo(BundleHashKey key, ByteSink output)
+				throws IOException, BundleLoadingFailedException;
+	}
+
+	public static class BundleIdentifierVersionMapRMIWrapper implements RMIWrapper {
+		private Map<String, ? extends Set<? extends BundleIdentifier>> map;
+
+		public BundleIdentifierVersionMapRMIWrapper() {
+		}
+
+		public BundleIdentifierVersionMapRMIWrapper(Map<String, ? extends Set<? extends BundleIdentifier>> map) {
+			this.map = map;
+		}
+
+		@Override
+		public void writeWrapped(RMIObjectOutput out) throws IOException {
+			SerialUtils.writeExternalMap(out, map, SerialUtils::writeExternalObject,
+					SerialUtils::writeExternalCollection);
+		}
+
+		@Override
+		public void readWrapped(RMIObjectInput in) throws IOException, ClassNotFoundException {
+			map = SerialUtils.readExternalMap(new TreeMap<>(COMPARATOR_REVERSE_VERSION_NUMBER), in,
+					SerialUtils::readExternalObject, SerialUtils::readExternalImmutableNavigableSet);
+		}
+
+		@Override
+		public Object resolveWrapped() {
+			return map;
+		}
+
+		@Override
+		public Object getWrappedObject() {
+			throw new UnsupportedOperationException();
+		}
+
+	}
+
+	@RMIWriter(RemoteRMIObjectWriteHandler.class)
+	private static class LocalStorageSharedAccessorImpl implements LocalStorageSharedAccessor {
+		private final LocalBundleStorageViewImpl storageView;
+
+		public LocalStorageSharedAccessorImpl(LocalBundleStorageViewImpl storageimpl) {
+			this.storageView = storageimpl;
+		}
+
+		@Override
+		public LocalStorageKey getLocalStorageKey() {
+			return storageView.getStorage().storageKey;
+		}
+
+		@Override
+		public InstallResult install(StreamWritable bundlecontents)
+				throws NullPointerException, IOException, UnsupportedOperationException, InvalidNestBundleException {
+			return storageView.install(bundlecontents);
+		}
+
+		@Override
+		public UUID getStorageState() {
+			return storageView.getStorage().storageStateIdentity;
+		}
+
+		@Override
+		public Set<? extends BundleIdentifier> lookupBundleVersions(BundleIdentifier bundleid) {
+			return storageView.lookupBundleVersions(bundleid);
+		}
+
+		@Override
+		public Map<String, ? extends NavigableSet<? extends BundleIdentifier>> lookupBundleIdentifiers(
+				String bundlename) {
+			return storageView.lookupBundleIdentifiers(bundlename);
+		}
+
+		@Override
+		public BundleHashKey lookupTaskBundle(TaskName taskname)
+				throws NullPointerException, TaskNotFoundException, IOException {
+			return new BundleHashKey(storageView.lookupTaskBundle(taskname));
+		}
+
+		@Override
+		public BundleHashKey getBundleHash(BundleIdentifier bundle)
+				throws NullPointerException, BundleLoadingFailedException {
+			return new BundleHashKey(storageView.getBundle(bundle));
+		}
+
+		@Override
+		public void writeBundleContentsTo(BundleHashKey key, ByteSink output)
+				throws IOException, BundleLoadingFailedException {
+			JarNestRepositoryBundle bundle = (JarNestRepositoryBundle) storageView.getBundle(key.bundleId);
+			if (!StringUtils.toHexString(bundle.getHash()).equals(key.hash)) {
+				throw new BundleLoadingFailedException("Bundle not found: " + key.bundleId + " with hash: " + key.hash);
+			}
+			LocalFileProvider.getInstance().writeTo(bundle.getJarPath(), output);
+		}
 	}
 
 	private static class SimpleInstallResult implements InstallResult {
@@ -958,17 +1239,10 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 
 	}
 
-	private final class LocalBundleStorageViewImpl extends AbstractBundleStorageView implements LocalBundleStorageView {
-		private final LocalBundleStorageViewKeyImpl storageViewKey;
-
-		private NavigableMap<BundleIdentifier, BundleInfoState> bundleInfoStates = ImmutableUtils
-				.makeImmutableNavigableMap(LocalBundleStorage.this.bundleInfoStates);
-		private NavigableMap<BundleIdentifier, PendingBundleInfoState> pendingBundleInfoStates = ImmutableUtils
-				.makeImmutableNavigableMap(LocalBundleStorage.this.pendingBundleInfoStates);
-
-		public LocalBundleStorageViewImpl() {
-			storageViewKey = new LocalBundleStorageViewKeyImpl(LocalBundleStorage.this.getStorageKey());
-		}
+	private abstract class BaseLocalBundleStorageViewImpl extends AbstractBundleStorageView
+			implements LocalBundleStorageView {
+		protected final LocalBundleStorageViewKeyImpl storageViewKey = new LocalBundleStorageViewKeyImpl(
+				LocalBundleStorage.this.getStorageKey());
 
 		@Override
 		public StorageViewKey getStorageViewKey() {
@@ -981,16 +1255,199 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 		}
 
 		@Override
+		public LocalBundleStorage getStorage() {
+			return LocalBundleStorage.this;
+		}
+
+		@Override
 		public Map<? extends ExternalArchiveKey, ? extends ExternalArchive> loadExternalArchives(
 				ExternalDependencyInformation depinfo)
 				throws NullPointerException, IllegalArgumentException, ExternalArchiveLoadingFailedException {
 			return repository.loadExternalArchives(depinfo, this);
 		}
+	}
+
+	private final class RemoteMirrorLocalBundleStorageViewImpl extends BaseLocalBundleStorageViewImpl {
+		private final StorageViewEnvironment viewEnvironment;
+		private final Object sharedAccessKey;
+
+		private LocalStorageSharedAccessor accessor;
+		private UUID state;
+
+		private final Path remoteDirectory = storageDirectory.resolve("remote");
+
+		public RemoteMirrorLocalBundleStorageViewImpl(StorageViewEnvironment viewenvironment, Object sharedaccesskey) {
+			this.viewEnvironment = viewenvironment;
+			this.sharedAccessKey = sharedaccesskey;
+			this.accessor = (LocalStorageSharedAccessor) viewenvironment.getSharedObject(sharedaccesskey);
+			if (this.accessor == null) {
+				throw new BundleStorageInitializationException(
+						"Failed to retrieve remote accessor for local bundle storage. (" + sharedaccesskey + ")");
+			}
+			this.state = accessor.getStorageState();
+			try {
+				Files.createDirectories(remoteDirectory);
+			} catch (IOException e) {
+				throw new BundleStorageInitializationException("Failed to initialize storage for remote bundles.", e);
+			}
+		}
 
 		@Override
 		public void updateStorageViewHash(MessageDigest digest) {
-			digest.update((ConfiguredRepositoryStorage.STORAGE_TYPE_LOCAL + ":(" + storageKey.fileProviderKey.getUUID()
-					+ ":" + storageDirectory + ")").getBytes(StandardCharsets.UTF_8));
+			updateHashWithStorageKey(digest, accessor.getLocalStorageKey());
+		}
+
+		@Override
+		public Set<? extends BundleIdentifier> lookupBundleVersions(BundleIdentifier bundleid)
+				throws NullPointerException {
+			// XXX cache
+			return accessor.lookupBundleVersions(bundleid);
+		}
+
+		@Override
+		public Map<String, ? extends NavigableSet<? extends BundleIdentifier>> lookupBundleIdentifiers(
+				String bundlename) throws NullPointerException, IllegalArgumentException {
+			// XXX cache
+			return accessor.lookupBundleIdentifiers(bundlename);
+		}
+
+		@Override
+		public InstallResult install(StreamWritable bundlecontents)
+				throws NullPointerException, IOException, UnsupportedOperationException, InvalidNestBundleException {
+			return accessor.install(bundlecontents);
+		}
+
+		@Override
+		public Object detectChanges(ExecutionPathConfiguration pathconfig) {
+			this.accessor = (LocalStorageSharedAccessor) viewEnvironment.getSharedObject(sharedAccessKey);
+			UUID nstate = accessor.getStorageState();
+			if (!Objects.equals(this.state, nstate)) {
+				return nstate;
+			}
+			return null;
+		}
+
+		@Override
+		public void handleChanges(ExecutionPathConfiguration pathconfig, Object detectedchanges) {
+			this.state = (UUID) detectedchanges;
+			//XXX clear cached things
+		}
+
+		@Override
+		public NestRepositoryBundle lookupTaskBundle(TaskName taskname)
+				throws NullPointerException, TaskNotFoundException, IOException {
+			// XXX cache
+			BundleHashKey bundle = accessor.lookupTaskBundle(taskname);
+			try {
+				return getBundle(bundle);
+			} catch (BundleLoadingFailedException e) {
+				throw new TaskNotFoundException(e, taskname);
+			}
+		}
+
+		@Override
+		public AbstractNestRepositoryBundle getBundle(BundleIdentifier bundleid)
+				throws NullPointerException, BundleLoadingFailedException {
+			// XXX cache
+			return getBundle(accessor.getBundleHash(bundleid));
+		}
+
+		@Override
+		public NavigableSet<TaskName> getPresentTaskNamesForInformationProvider() {
+			//ignoreable for cluster repo
+			return Collections.emptyNavigableSet();
+		}
+
+		@Override
+		public NavigableSet<BundleIdentifier> getPresentBundlesForInformationProvider() {
+			//ignoreable for cluster repo
+			return Collections.emptyNavigableSet();
+		}
+
+		private AbstractNestRepositoryBundle getBundle(BundleHashKey key) throws BundleLoadingFailedException {
+			AbstractNestRepositoryBundle got = remoteLoadedBundles.get(key);
+			if (got != null) {
+				return got;
+			}
+			synchronized (remoteBundleLoadLocks.computeIfAbsent(key, Functionals.objectComputer())) {
+				got = remoteLoadedBundles.get(key);
+				if (got != null) {
+					return got;
+				}
+				Path bundledir = remoteDirectory.resolve(key.bundleId.toString());
+				Path bundlepath = bundledir.resolve(key.hash + ".jar");
+				try {
+					Files.createDirectories(bundledir);
+					if (!Files.isRegularFile(bundlepath)) {
+						Path temppath = bundlepath.resolveSibling(UUID.randomUUID().toString());
+						try {
+							try (ByteSink outsink = LocalFileProvider.getInstance().openOutput(temppath,
+									StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
+								accessor.writeBundleContentsTo(key, outsink);
+							}
+							try {
+								Files.move(temppath, bundlepath);
+							} catch (IOException e) {
+								//failed to move, others might've concurrently moved there
+								//delete the temp file and proceed with loading
+								//if the file still is not accessible at the path, an exception is thrown down the line.
+								try {
+									Files.deleteIfExists(temppath);
+								} catch (Throwable e2) {
+									e2.addSuppressed(e);
+									throw e2;
+								}
+							}
+						} catch (Throwable e) {
+							//only need to delete if something failed, otherwise it was moved
+							try {
+								Files.deleteIfExists(temppath);
+							} catch (Throwable e2) {
+								e.addSuppressed(e2);
+							}
+							throw e;
+						}
+					}
+					JarNestRepositoryBundleImpl result = JarNestRepositoryBundleImpl.create(LocalBundleStorage.this,
+							bundlepath);
+					try {
+						if (!key.bundleId.equals(result.getBundleIdentifier())) {
+							throw new InvalidNestBundleException("Bundle identifier mismatch for: "
+									+ result.getBundleIdentifier() + " with expected: " + key.bundleId);
+						}
+						NestRepositoryBundle prevloaded = remoteLoadedBundles.putIfAbsent(key, result);
+						if (prevloaded != null) {
+							//shouldn't ever happen, as we're locking
+							throw new AssertionError("Concurrency error when loading bundles.");
+						}
+						allLoadedBundles.add(result);
+						return result;
+					} catch (Throwable e) {
+						IOUtils.addExc(e, IOUtils.closeExc(result));
+						throw e;
+					}
+				} catch (IOException | InvalidNestBundleException e) {
+					throw new BundleLoadingFailedException(
+							"Failed to load remote bundle " + key.bundleId.toString() + " with hash: " + key.hash, e);
+				}
+			}
+		}
+
+	}
+
+	private final class LocalBundleStorageViewImpl extends BaseLocalBundleStorageViewImpl {
+		private NavigableMap<BundleIdentifier, BundleInfoState> bundleInfoStates = ImmutableUtils
+				.makeImmutableNavigableMap(LocalBundleStorage.this.bundleInfoStates);
+		private NavigableMap<BundleIdentifier, PendingBundleInfoState> pendingBundleInfoStates = ImmutableUtils
+				.makeImmutableNavigableMap(LocalBundleStorage.this.pendingBundleInfoStates);
+
+		public LocalBundleStorageViewImpl() {
+		}
+
+		@Override
+		public void updateStorageViewHash(MessageDigest digest) {
+			LocalStorageKey storagekey = storageKey;
+			updateHashWithStorageKey(digest, storagekey);
 		}
 
 		@Override
@@ -1016,8 +1473,7 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 		@Override
 		public Set<BundleIdentifier> lookupBundleVersions(BundleIdentifier bundleid) throws NullPointerException {
 			Objects.requireNonNull(bundleid, "bundle identifier");
-			NavigableMap<String, BundleIdentifier> lookupres = new TreeMap<>(
-					Collections.reverseOrder(BundleIdentifier::compareVersionNumbers));
+			NavigableMap<String, BundleIdentifier> lookupres = new TreeMap<>(COMPARATOR_REVERSE_VERSION_NUMBER);
 			for (BundleIdentifier b : bundleInfoStates.keySet()) {
 				if (b.getName().equals(bundleid.getName())
 						&& b.getBundleQualifiers().equals(bundleid.getBundleQualifiers())) {
@@ -1040,14 +1496,13 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 		}
 
 		@Override
-		public Map<String, ? extends Set<? extends BundleIdentifier>> lookupBundleIdentifiers(String bundlename)
-				throws NullPointerException, IllegalArgumentException {
+		public Map<String, ? extends NavigableSet<? extends BundleIdentifier>> lookupBundleIdentifiers(
+				String bundlename) throws NullPointerException, IllegalArgumentException {
 			Objects.requireNonNull(bundlename, "bundle name");
 			if (!BundleIdentifier.isValidBundleName(bundlename)) {
 				throw new IllegalArgumentException("Invalid bundle name: " + bundlename);
 			}
-			Map<String, Set<BundleIdentifier>> result = new TreeMap<>(
-					Collections.reverseOrder(BundleIdentifier::compareVersionNumbers));
+			Map<String, NavigableSet<BundleIdentifier>> result = new TreeMap<>(COMPARATOR_REVERSE_VERSION_NUMBER);
 			for (BundleIdentifier b : bundleInfoStates.keySet()) {
 				if (b.getName().equals(bundlename)) {
 					String vnum = b.getVersionNumber();
@@ -1068,57 +1523,51 @@ public class LocalBundleStorage extends AbstractBundleStorage {
 		}
 
 		@Override
-		public AbstractBundleStorage getStorage() {
-			return LocalBundleStorage.this;
-		}
-
-		@Override
 		public AbstractNestRepositoryBundle getBundle(BundleIdentifier bundleid)
 				throws NullPointerException, BundleLoadingFailedException {
 			Objects.requireNonNull(bundleid, "bundleid");
 			AbstractNestRepositoryBundle got = loadedBundles.get(bundleid);
-			if (got == null) {
-				synchronized (bundleLoadLocks.computeIfAbsent(bundleid, Functionals.objectComputer())) {
-					got = loadedBundles.get(bundleid);
-					if (got != null) {
-						return got;
+			if (got != null) {
+				return got;
+			}
+			synchronized (bundleLoadLocks.computeIfAbsent(bundleid, Functionals.objectComputer())) {
+				got = loadedBundles.get(bundleid);
+				if (got != null) {
+					return got;
+				}
+				Path bundlejar;
+				PendingBundleInfoState pendinginfostate = pendingBundleInfoStates.get(bundleid);
+				if (pendinginfostate != null) {
+					if (pendinginfostate.openFailException != null) {
+						throw new BundleLoadingFailedException(bundleid.toString(), pendinginfostate.openFailException);
 					}
-					Path bundlejar;
-					PendingBundleInfoState pendinginfostate = pendingBundleInfoStates.get(bundleid);
-					if (pendinginfostate != null) {
-						if (pendinginfostate.openFailException != null) {
-							throw new BundleLoadingFailedException(bundleid.toString(),
-									pendinginfostate.openFailException);
-						}
-						bundlejar = pendinginfostate.bundlePath;
-					} else {
-						bundlejar = getInstalledBundleJarPath(bundleid);
-					}
+					bundlejar = pendinginfostate.bundlePath;
+				} else {
+					bundlejar = getInstalledBundleJarPath(bundleid);
+				}
+				try {
+					JarNestRepositoryBundleImpl result = JarNestRepositoryBundleImpl.create(LocalBundleStorage.this,
+							bundlejar);
 					try {
-						JarNestRepositoryBundleImpl result = JarNestRepositoryBundleImpl.create(LocalBundleStorage.this,
-								bundlejar);
-						try {
-							if (!bundleid.equals(result.getBundleIdentifier())) {
-								throw new InvalidNestBundleException("Bundle identifier mismatch for: "
-										+ result.getBundleIdentifier() + " with expected: " + bundleid);
-							}
-							NestRepositoryBundle prevloaded = loadedBundles.putIfAbsent(bundleid, result);
-							if (prevloaded != null) {
-								//shouldn't ever happen, as we're locking
-								throw new AssertionError("Concurrency error when loading bundles.");
-							}
-							allLoadedBundles.add(result);
-							return result;
-						} catch (Throwable e) {
-							IOUtils.addExc(e, IOUtils.closeExc(result));
-							throw e;
+						if (!bundleid.equals(result.getBundleIdentifier())) {
+							throw new InvalidNestBundleException("Bundle identifier mismatch for: "
+									+ result.getBundleIdentifier() + " with expected: " + bundleid);
 						}
-					} catch (IOException | InvalidNestBundleException e) {
-						throw new BundleLoadingFailedException(bundleid.toString(), e);
+						NestRepositoryBundle prevloaded = loadedBundles.putIfAbsent(bundleid, result);
+						if (prevloaded != null) {
+							//shouldn't ever happen, as we're locking
+							throw new AssertionError("Concurrency error when loading bundles.");
+						}
+						allLoadedBundles.add(result);
+						return result;
+					} catch (Throwable e) {
+						IOUtils.addExc(e, IOUtils.closeExc(result));
+						throw e;
 					}
+				} catch (IOException | InvalidNestBundleException e) {
+					throw new BundleLoadingFailedException(bundleid.toString(), e);
 				}
 			}
-			return got;
 		}
 
 		@Override

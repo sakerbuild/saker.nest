@@ -92,9 +92,9 @@ public class ServerIndexUpdateCommand {
 
 	public void call(ExecuteActionCommand execute) throws InvalidPathFormatException, IOException {
 		boolean displayedavailable = false;
-		try (ConfiguredRepositoryStorage configuredstorage = new ConfiguredRepositoryStorage(execute.repository,
-				repositoryId, ExecutionPathConfiguration.local(SakerPath.valueOf(System.getProperty("user.dir"))),
-				userParameters)) {
+		try (ConfiguredRepositoryStorage configuredstorage = ConfiguredRepositoryStorage.forRepositoryAction(
+				execute.repository, repositoryId,
+				ExecutionPathConfiguration.local(SakerPath.valueOf(System.getProperty("user.dir"))), userParameters)) {
 			Map<String, AbstractServerBundleStorageView> updatestorages = new TreeMap<>();
 			Map<String, ? extends AbstractServerBundleStorageView> serverstorages = configuredstorage
 					.getServerStorages();

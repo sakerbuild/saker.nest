@@ -172,9 +172,9 @@ public class MainCommand {
 		BundleIdentifier bundleid = getBundleIdentifier();
 		ClassLoader contextcl = currentthread.getContextClassLoader();
 		currentthread.setContextClassLoader(null);
-		try (ConfiguredRepositoryStorage configuredstorage = new ConfiguredRepositoryStorage(execute.repository,
-				repositoryId, ExecutionPathConfiguration.local(SakerPath.valueOf(System.getProperty("user.dir"))),
-				userParameters)) {
+		try (ConfiguredRepositoryStorage configuredstorage = ConfiguredRepositoryStorage.forRepositoryAction(
+				execute.repository, repositoryId,
+				ExecutionPathConfiguration.local(SakerPath.valueOf(System.getProperty("user.dir"))), userParameters)) {
 			Method method = getMainMethod(bundleid, configuredstorage);
 			String[] mainargs = arguments.toArray(ObjectUtils.EMPTY_STRING_ARRAY);
 			try {

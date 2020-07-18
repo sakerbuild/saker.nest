@@ -59,6 +59,7 @@ import saker.build.file.provider.FileHashResult;
 import saker.build.file.provider.LocalFileProvider;
 import saker.build.file.provider.RootFileProviderKey;
 import saker.build.file.provider.SakerFileProvider;
+import saker.build.file.provider.SakerPathFiles;
 import saker.build.runtime.params.ExecutionPathConfiguration;
 import saker.build.runtime.repository.TaskNotFoundException;
 import saker.build.task.TaskName;
@@ -207,9 +208,8 @@ public class ParameterBundleStorage extends AbstractBundleStorage {
 	}
 
 	@Override
-	public AbstractBundleStorageView newStorageView(Map<String, String> userparameters,
-			ExecutionPathConfiguration pathconfig) {
-		return new ParameterBundleStorageViewImpl(userparameters, pathconfig);
+	public AbstractBundleStorageView newStorageView(StorageViewEnvironment viewenvironment) {
+		return new ParameterBundleStorageViewImpl(viewenvironment);
 	}
 
 	private JarNestRepositoryBundleImpl getLoadBundle(Path jp)
@@ -320,9 +320,17 @@ public class ParameterBundleStorage extends AbstractBundleStorage {
 
 		private Map<String, String> userParameters;
 
-		public ParameterBundleStorageViewImpl(Map<String, String> userparameters,
-				ExecutionPathConfiguration pathconfig) {
+		private final SakerFileProvider localFileProvider;
+
+		public ParameterBundleStorageViewImpl(StorageViewEnvironment viewenvironment) {
+			this(viewenvironment.getUserParameters(), viewenvironment.getPathConfiguration(),
+					viewenvironment.getLocalFileProvider());
+		}
+
+		private ParameterBundleStorageViewImpl(Map<String, String> userparameters,
+				ExecutionPathConfiguration pathconfig, SakerFileProvider localfp) {
 			this.userParameters = userparameters;
+			this.localFileProvider = localfp;
 			Map<ProviderHolderPathKey, BasicFileAttributes> paramjarpaths = getParameterJarPaths(pathconfig);
 
 			NavigableMap<BundleIdentifier, ContentDescriptor> bundlehashes = new TreeMap<>();
@@ -359,11 +367,10 @@ public class ParameterBundleStorage extends AbstractBundleStorage {
 				if (path.startsWith("//")) {
 					String actualpathstr = path.substring(2);
 					WildcardPath wc = WildcardPath.valueOf(actualpathstr);
-					NavigableMap<SakerPath, ? extends BasicFileAttributes> files = wc
-							.getFiles(LocalFileProvider.getInstance());
+					NavigableMap<SakerPath, ? extends BasicFileAttributes> files = wc.getFiles(localFileProvider);
 					if (!ObjectUtils.isNullOrEmpty(files)) {
 						for (Entry<SakerPath, ? extends BasicFileAttributes> entry : files.entrySet()) {
-							bundlepathattrs.put(LocalFileProvider.getInstance().getPathKey(entry.getKey()),
+							bundlepathattrs.put(SakerPathFiles.getPathKey(localFileProvider, entry.getKey()),
 									entry.getValue());
 						}
 					}

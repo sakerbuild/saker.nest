@@ -373,7 +373,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 				try {
 					if (channel == null) {
 						channel = bundle.getChannel();
-						synchronized (bundleid) {
+						synchronized (bundle) {
 							verifyBundleSignature(channel, bundleid, verifyconfig, signatureholder, offline);
 						}
 					} else {
@@ -539,6 +539,10 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 	}
 
 	@Override
+	public AbstractBundleStorageView newStorageView(StorageViewEnvironment viewenvironment) {
+		return newStorageView(viewenvironment.getUserParameters(), viewenvironment.getPathConfiguration());
+	}
+
 	public AbstractBundleStorageView newStorageView(Map<String, String> userparameters,
 			ExecutionPathConfiguration pathconfig) {
 		boolean uncacherequests = getUncacheRequestsValue(userparameters);

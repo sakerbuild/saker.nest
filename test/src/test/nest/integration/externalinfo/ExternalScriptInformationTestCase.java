@@ -68,7 +68,7 @@ public abstract class ExternalScriptInformationTestCase extends SakerTestCase {
 								.resolve(getClass().getName().replace('.', '/'))));
 				try (BuildRepository buildrepo = repo.createBuildRepository(new SimpleRepositoryBuildEnvironment(
 						new ForwardingImplSakerEnvironment(environment), new ClassLoaderResolverRegistry(), userparams,
-						pathconfig, NestRepositoryFactory.IDENTIFIER))) {
+						pathconfig, NestRepositoryFactory.IDENTIFIER, LocalFileProvider.getInstance()))) {
 					ExternalScriptInformationProvider infoprovider = buildrepo.getScriptInformationProvider();
 					assertNonNull(infoprovider);
 					runOnInfoProvider(infoprovider);

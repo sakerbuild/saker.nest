@@ -180,8 +180,7 @@ public class NestBuildRepositoryImpl implements BuildRepository {
 				return cached;
 			}
 		}
-		return new ConfiguredRepositoryStorage(nestRepository, environment.getIdentifier(),
-				environment.getPathConfiguration(), environment.getUserParameters());
+		return ConfiguredRepositoryStorage.forBuildRepository(nestRepository, environment);
 	}
 
 	public RepositoryBuildEnvironment getBuildEnvironment() {

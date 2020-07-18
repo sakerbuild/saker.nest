@@ -17,14 +17,11 @@ package saker.nest.bundle.storage;
 
 import java.io.Closeable;
 import java.nio.file.Path;
-import java.util.Map;
 
-import saker.build.runtime.params.ExecutionPathConfiguration;
 import saker.nest.bundle.NestRepositoryBundle;
 
 public abstract class AbstractBundleStorage implements BundleStorage, Closeable {
-	public abstract AbstractBundleStorageView newStorageView(Map<String, String> userparameters,
-			ExecutionPathConfiguration pathconfig);
+	public abstract AbstractBundleStorageView newStorageView(StorageViewEnvironment viewenvironment);
 
 	public abstract Path getBundleLibStoragePath(NestRepositoryBundle bundle)
 			throws NullPointerException, IllegalArgumentException;
