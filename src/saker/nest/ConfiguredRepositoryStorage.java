@@ -1298,7 +1298,7 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			AbstractNestRepositoryBundle domainbundle;
 			try {
 				domainbundle = domainbundlestorage.getBundle(domain.bundle.getBundleIdentifier());
-			} catch (NullPointerException | BundleLoadingFailedException e) {
+			} catch (BundleLoadingFailedException e) {
 				throw new AssertionError(
 						"Failed to retrieve previously resolved bundle. (" + domain.bundle.getBundleIdentifier() + ")",
 						e);

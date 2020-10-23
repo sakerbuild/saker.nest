@@ -136,7 +136,7 @@ public class IndexHopServerStorageTaskTest extends CollectingMetricEnvironmentTe
 	private final class NestMetricImplementation extends BasicServerNestMetric {
 
 		@Override
-		public Integer getServerRequestResponseCode(String requesturl) throws IOException {
+		public Integer getServerRequestResponseCode(String method, String requesturl) throws IOException {
 			System.out.println("IndexHopServerStorageTaskTest.NestMetricImplementation.getServerRequestResponseCode() "
 					+ requesturl);
 			if ("https://testurl/bundle/download/simple.bundle-v1".equals(requesturl)) {
@@ -166,11 +166,11 @@ public class IndexHopServerStorageTaskTest extends CollectingMetricEnvironmentTe
 			if ("https://testurl/bundles/index/s/i/split.2".equals(requesturl)) {
 				return HttpURLConnection.HTTP_OK;
 			}
-			return super.getServerRequestResponseCode(requesturl);
+			return super.getServerRequestResponseCode(method, requesturl);
 		}
 
 		@Override
-		public InputStream getServerRequestResponseStream(String requesturl) throws IOException {
+		public InputStream getServerRequestResponseStream(String method, String requesturl) throws IOException {
 			System.out
 					.println("IndexHopServerStorageTaskTest.NestMetricImplementation.getServerRequestResponseStream() "
 							+ requesturl);
@@ -201,7 +201,7 @@ public class IndexHopServerStorageTaskTest extends CollectingMetricEnvironmentTe
 			if ("https://testurl/bundles/index/s/i/split.2".equals(requesturl)) {
 				return Files.newInputStream(getWorkingDirectory().resolve("bundlesindex/s/i/split.2.json"));
 			}
-			return super.getServerRequestResponseStream(requesturl);
+			return super.getServerRequestResponseStream(method, requesturl);
 		}
 	}
 }

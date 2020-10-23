@@ -32,19 +32,20 @@ import saker.build.file.provider.SakerFileProvider;
 import saker.build.runtime.params.ExecutionPathConfiguration;
 
 public interface NestMetric {
-	public default Integer getServerRequestResponseCode(String requesturl) throws IOException {
+	public default Integer getServerRequestResponseCode(String method, String requesturl) throws IOException {
 		return null;
 	}
 
-	public default InputStream getServerRequestResponseStream(String requesturl) throws IOException {
+	public default InputStream getServerRequestResponseStream(String method, String requesturl) throws IOException {
 		throw new IOException("no data (" + this + "): " + requesturl);
 	}
 
-	public default InputStream getServerRequestResponseErrorStream(String requesturl) throws IOException {
+	public default InputStream getServerRequestResponseErrorStream(String method, String requesturl)
+			throws IOException {
 		throw new IOException("no data (" + this + "): " + requesturl);
 	}
 
-	public default Map<String, String> getServerRequestResponseHeaders(String requesturl) {
+	public default Map<String, String> getServerRequestResponseHeaders(String method, String requesturl) {
 		return Collections.emptyMap();
 	}
 

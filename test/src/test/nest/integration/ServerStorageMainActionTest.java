@@ -125,25 +125,25 @@ public class ServerStorageMainActionTest extends ManualLoadedRepositoryTestCase 
 
 	private final class NestMetricImplementation extends BasicServerNestMetric {
 		@Override
-		public Integer getServerRequestResponseCode(String requesturl) throws IOException {
+		public Integer getServerRequestResponseCode(String method, String requesturl) throws IOException {
 			if ("https://testurl/bundle/download/simple.bundle-v1".equals(requesturl)) {
 				return HttpURLConnection.HTTP_OK;
 			}
 			if ("https://testurl/bundles/index".equals(requesturl)) {
 				return HttpURLConnection.HTTP_OK;
 			}
-			return super.getServerRequestResponseCode(requesturl);
+			return super.getServerRequestResponseCode(method, requesturl);
 		}
 
 		@Override
-		public InputStream getServerRequestResponseStream(String requesturl) throws IOException {
+		public InputStream getServerRequestResponseStream(String method, String requesturl) throws IOException {
 			if ("https://testurl/bundle/download/simple.bundle-v1".equals(requesturl)) {
 				return Files.newInputStream(bundleOutDir.resolve("simple.bundle-v1.jar"));
 			}
 			if ("https://testurl/bundles/index".equals(requesturl)) {
 				return Files.newInputStream(workingDir.resolve("bundlesindex/index.json"));
 			}
-			return super.getServerRequestResponseStream(requesturl);
+			return super.getServerRequestResponseStream(method, requesturl);
 		}
 
 	}

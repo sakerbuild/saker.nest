@@ -174,7 +174,7 @@ public class IndexModifyServerStorageTaskTest extends CollectingMetricEnvironmen
 		private boolean replace = false;
 
 		@Override
-		public Integer getServerRequestResponseCode(String requesturl) throws IOException {
+		public Integer getServerRequestResponseCode(String method, String requesturl) throws IOException {
 			if ("https://testurl/bundle/download/simple.bundle-v1".equals(requesturl)) {
 				return HttpURLConnection.HTTP_OK;
 			}
@@ -193,11 +193,11 @@ public class IndexModifyServerStorageTaskTest extends CollectingMetricEnvironmen
 			if ("https://testurl/bundles/index/s/i".equals(requesturl)) {
 				return HttpURLConnection.HTTP_OK;
 			}
-			return super.getServerRequestResponseCode(requesturl);
+			return super.getServerRequestResponseCode(method, requesturl);
 		}
 
 		@Override
-		public InputStream getServerRequestResponseStream(String requesturl) throws IOException {
+		public InputStream getServerRequestResponseStream(String method, String requesturl) throws IOException {
 			if ("https://testurl/bundle/download/simple.bundle-v1".equals(requesturl)) {
 				return Files.newInputStream(bundleOutDir.resolve("simple.bundle-v1.jar"));
 			}
@@ -219,7 +219,7 @@ public class IndexModifyServerStorageTaskTest extends CollectingMetricEnvironmen
 			if ("https://testurl/bundles/index/s/i".equals(requesturl)) {
 				return Files.newInputStream(getWorkingDirectory().resolve("bundlesindex/s/i/index.json"));
 			}
-			return super.getServerRequestResponseStream(requesturl);
+			return super.getServerRequestResponseStream(method, requesturl);
 		}
 	}
 }

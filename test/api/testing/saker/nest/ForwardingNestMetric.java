@@ -20,27 +20,27 @@ public class ForwardingNestMetric implements NestMetric {
 	}
 
 	@Override
-	public Integer getServerRequestResponseCode(String requesturl) throws IOException {
-		return metric != null ? metric.getServerRequestResponseCode(requesturl)
-				: NestMetric.super.getServerRequestResponseCode(requesturl);
+	public Integer getServerRequestResponseCode(String method, String requesturl) throws IOException {
+		return metric != null ? metric.getServerRequestResponseCode(method, requesturl)
+				: NestMetric.super.getServerRequestResponseCode(method, requesturl);
 	}
 
 	@Override
-	public InputStream getServerRequestResponseStream(String requesturl) throws IOException {
-		return metric != null ? metric.getServerRequestResponseStream(requesturl)
-				: NestMetric.super.getServerRequestResponseStream(requesturl);
+	public InputStream getServerRequestResponseStream(String method, String requesturl) throws IOException {
+		return metric != null ? metric.getServerRequestResponseStream(method, requesturl)
+				: NestMetric.super.getServerRequestResponseStream(method, requesturl);
 	}
 
 	@Override
-	public InputStream getServerRequestResponseErrorStream(String requesturl) throws IOException {
-		return metric != null ? metric.getServerRequestResponseErrorStream(requesturl)
-				: NestMetric.super.getServerRequestResponseErrorStream(requesturl);
+	public InputStream getServerRequestResponseErrorStream(String method, String requesturl) throws IOException {
+		return metric != null ? metric.getServerRequestResponseErrorStream(method, requesturl)
+				: NestMetric.super.getServerRequestResponseErrorStream(method, requesturl);
 	}
 
 	@Override
-	public Map<String, String> getServerRequestResponseHeaders(String requesturl) {
-		return metric != null ? metric.getServerRequestResponseHeaders(requesturl)
-				: NestMetric.super.getServerRequestResponseHeaders(requesturl);
+	public Map<String, String> getServerRequestResponseHeaders(String method, String requesturl) {
+		return metric != null ? metric.getServerRequestResponseHeaders(method, requesturl)
+				: NestMetric.super.getServerRequestResponseHeaders(method, requesturl);
 	}
 
 	@Override

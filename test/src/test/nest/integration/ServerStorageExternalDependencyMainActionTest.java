@@ -104,7 +104,7 @@ public class ServerStorageExternalDependencyMainActionTest extends ManualLoadedR
 		}
 
 		@Override
-		public Integer getServerRequestResponseCode(String requesturl) throws IOException {
+		public Integer getServerRequestResponseCode(String method, String requesturl) throws IOException {
 			if ("https://testurl/bundle/download/simple.bundle-v1".equals(requesturl)) {
 				return HttpURLConnection.HTTP_OK;
 			}
@@ -114,11 +114,11 @@ public class ServerStorageExternalDependencyMainActionTest extends ManualLoadedR
 			if (externalBytes.containsKey(requesturl)) {
 				return HttpURLConnection.HTTP_OK;
 			}
-			return super.getServerRequestResponseCode(requesturl);
+			return super.getServerRequestResponseCode(method, requesturl);
 		}
 
 		@Override
-		public InputStream getServerRequestResponseStream(String requesturl) throws IOException {
+		public InputStream getServerRequestResponseStream(String method, String requesturl) throws IOException {
 			if ("https://testurl/bundle/download/simple.bundle-v1".equals(requesturl)) {
 				return Files.newInputStream(bundleOutDir.resolve("simple.bundle-v1.jar"));
 			}
@@ -129,7 +129,7 @@ public class ServerStorageExternalDependencyMainActionTest extends ManualLoadedR
 			if (bytes != null) {
 				return new UnsyncByteArrayInputStream(bytes);
 			}
-			return super.getServerRequestResponseStream(requesturl);
+			return super.getServerRequestResponseStream(method, requesturl);
 		}
 
 	}

@@ -646,12 +646,13 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		}
 		try {
 			if (TestFlag.ENABLED) {
-				Integer rc = TestFlag.metric().getServerRequestResponseCode(url.toString());
+				Integer rc = TestFlag.metric().getServerRequestResponseCode(method, url.toString());
 				if (rc != null) {
 					return handler.handle(url, rc,
-							() -> TestFlag.metric().getServerRequestResponseStream(url.toString()),
-							() -> TestFlag.metric().getServerRequestResponseErrorStream(url.toString()),
-							(header) -> TestFlag.metric().getServerRequestResponseHeaders(url.toString()).get(header));
+							() -> TestFlag.metric().getServerRequestResponseStream(method, url.toString()),
+							() -> TestFlag.metric().getServerRequestResponseErrorStream(method, url.toString()),
+							(header) -> TestFlag.metric().getServerRequestResponseHeaders(method, url.toString())
+									.get(header));
 				}
 			}
 			HttpURLConnection connection = (HttpURLConnection) url.openConnection();
@@ -746,6 +747,7 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		}
 
 		public void writeTo(Path filepath) throws IOException {
+			//XXX might want to use a temporary file to avoid interfering with concurrent agents
 			JSONObject obj = new JSONObject();
 			obj.put("signature", BASE64_ENCODER.encodeToString(signatureBytes));
 			obj.put("version", version);
@@ -888,8 +890,8 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 	}
 
 	private static class DownloadedBundle {
-		protected Path bundle;
-		protected BundleSignatureHolder signature;
+		protected final Path bundle;
+		protected final BundleSignatureHolder signature;
 
 		public DownloadedBundle(Path bundle, BundleSignatureHolder signature) {
 			this.bundle = bundle;
@@ -1006,6 +1008,10 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		}
 		try {
 			BundleInformation info = result.getInformation();
+			if (!bundleid.equals(info.getBundleIdentifier())) {
+				throw new BundleLoadingFailedException(
+						"Bundle identifier mismatch: " + info.getBundleIdentifier() + " with expected: " + bundleid);
+			}
 			ExternalDependencyInformation extdeps = info.getExternalDependencyInformation();
 			for (Entry<URI, Hashes> entry : BundleUtils.getExternalDependencyInformationHashes(extdeps).entrySet()) {
 				if (entry.getValue().sha256 == null) {
@@ -2051,10 +2057,6 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 							got = new LoadedBundleState(bundleid, null, bundlejarpath,
 									signatureVerificationConfiguration, offline);
 							loadedBundles.put(bundleid, got);
-							if (!bundleid.equals(got.bundle.getBundleIdentifier())) {
-								throw new BundleLoadingFailedException("Bundle identifier mismatch: "
-										+ got.bundle.getBundleIdentifier() + " with expected: " + bundleid);
-							}
 							got.verifyBundleWithConfig(signatureVerificationConfiguration, offline);
 							return got.bundle;
 						} catch (IOException e) {
@@ -2069,14 +2071,25 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 					//download the bundle
 					DownloadedBundle downloadres = downloadBundle(bundleid, bundlejarpath, offline);
 					try {
-						got = new LoadedBundleState(bundleid, null, downloadres.bundle,
+						got = new LoadedBundleState(bundleid, downloadres.signature, downloadres.bundle,
 								signatureVerificationConfiguration, offline);
 					} catch (IOException e) {
 						throw new BundleLoadingFailedException(
 								"Failed to load bundle: " + bundleid + " from storage: " + bundlejarpath, e);
 					}
 					loadedBundles.put(bundleid, got);
-					got.verifyBundleWithConfig(signatureVerificationConfiguration, downloadres.signature, offline);
+
+					//if we successfully verified the bundle, persist the downloaded signature
+					if (downloadres.signature != null) {
+						//persist the signature
+						Path signaturefilepath = getBundleSignaturePathFromBundlePath(bundlejarpath);
+						try {
+							downloadres.signature.writeTo(signaturefilepath);
+						} catch (IOException e) {
+							//ignoreable, as the bundle is alerady verified
+						}
+					}
+					//no need to verify again for the signature config, as it is done when the bundle is opened
 					return got.bundle;
 				}
 			} catch (NestSignatureVerificationException e) {

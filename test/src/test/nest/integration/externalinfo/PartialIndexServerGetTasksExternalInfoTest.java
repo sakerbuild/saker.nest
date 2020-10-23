@@ -77,7 +77,7 @@ public class PartialIndexServerGetTasksExternalInfoTest extends ExternalScriptIn
 
 	private final class NestMetricImplementation extends BasicServerNestMetric {
 		@Override
-		public Integer getServerRequestResponseCode(String requesturl) throws IOException {
+		public Integer getServerRequestResponseCode(String method, String requesturl) throws IOException {
 			System.out.println(
 					"PartialIndexServerGetTasksExternalInfoTest.NestMetricImplementation.getServerRequestResponseCode() "
 							+ requesturl);
@@ -99,11 +99,11 @@ public class PartialIndexServerGetTasksExternalInfoTest extends ExternalScriptIn
 			if ("https://testurl/bundles/index".equals(requesturl)) {
 				return HttpURLConnection.HTTP_OK;
 			}
-			return super.getServerRequestResponseCode(requesturl);
+			return super.getServerRequestResponseCode(method, requesturl);
 		}
 
 		@Override
-		public InputStream getServerRequestResponseStream(String requesturl) throws IOException {
+		public InputStream getServerRequestResponseStream(String method, String requesturl) throws IOException {
 			System.out.println(
 					"PartialIndexServerGetTasksExternalInfoTest.NestMetricImplementation.getServerRequestResponseStream() "
 							+ requesturl);
@@ -122,7 +122,7 @@ public class PartialIndexServerGetTasksExternalInfoTest extends ExternalScriptIn
 			if ("https://testurl/bundles/index".equals(requesturl)) {
 				return Files.newInputStream(getWorkingDirectory().resolve("bundlesindex/index.json"));
 			}
-			return super.getServerRequestResponseStream(requesturl);
+			return super.getServerRequestResponseStream(method, requesturl);
 		}
 	}
 }

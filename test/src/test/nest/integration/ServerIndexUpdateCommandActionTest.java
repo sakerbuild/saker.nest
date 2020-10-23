@@ -62,7 +62,7 @@ public class ServerIndexUpdateCommandActionTest extends ManualLoadedRepositoryTe
 		protected ConcurrentSkipListSet<Path> queriedPaths = new ConcurrentSkipListSet<>();
 
 		@Override
-		public Integer getServerRequestResponseCode(String requesturl) throws IOException {
+		public Integer getServerRequestResponseCode(String method, String requesturl) throws IOException {
 			System.out.println("IndexHopServerStorageTaskTest.NestMetricImplementation.getServerRequestResponseCode() "
 					+ requesturl);
 			if (requesturl.startsWith("https://testurl/bundle/download/simple.bundle-v1?")) {
@@ -93,11 +93,11 @@ public class ServerIndexUpdateCommandActionTest extends ManualLoadedRepositoryTe
 				return HttpURLConnection.HTTP_OK;
 			}
 			System.out.println("Unhandled response code: " + requesturl);
-			return super.getServerRequestResponseCode(requesturl);
+			return super.getServerRequestResponseCode(method, requesturl);
 		}
 
 		@Override
-		public InputStream getServerRequestResponseStream(String requesturl) throws IOException {
+		public InputStream getServerRequestResponseStream(String method, String requesturl) throws IOException {
 			System.out
 					.println("IndexHopServerStorageTaskTest.NestMetricImplementation.getServerRequestResponseStream() "
 							+ requesturl);
@@ -137,7 +137,7 @@ public class ServerIndexUpdateCommandActionTest extends ManualLoadedRepositoryTe
 				return Files.newInputStream(path);
 			}
 			System.out.println("Unhandled stream: " + requesturl);
-			return super.getServerRequestResponseStream(requesturl);
+			return super.getServerRequestResponseStream(method, requesturl);
 		}
 	}
 }

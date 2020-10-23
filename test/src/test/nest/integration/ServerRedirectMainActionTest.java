@@ -81,40 +81,41 @@ public class ServerRedirectMainActionTest extends ManualLoadedRepositoryTestCase
 
 	private final class NestMetricImplementation extends BasicServerNestMetric {
 		@Override
-		public Integer getServerRequestResponseCode(String requesturl) throws IOException {
+		public Integer getServerRequestResponseCode(String method, String requesturl) throws IOException {
 			if ("https://testurl/bundle/download/simple.bundle-v1".equals(requesturl)) {
 				return HttpURLConnection.HTTP_MOVED_TEMP;
 			}
 			if ("https://redirected/simple.bundle-v1".equals(requesturl)) {
 				return HttpURLConnection.HTTP_OK;
 			}
-			return super.getServerRequestResponseCode(requesturl);
+			return super.getServerRequestResponseCode(method, requesturl);
 		}
 
 		@Override
-		public Map<String, String> getServerRequestResponseHeaders(String requesturl) {
+		public Map<String, String> getServerRequestResponseHeaders(String method, String requesturl) {
 			if ("https://testurl/bundle/download/simple.bundle-v1".equals(requesturl)) {
-				TreeMap<String, String> res = ObjectUtils.newTreeMap(super.getServerRequestResponseHeaders(requesturl));
+				TreeMap<String, String> res = ObjectUtils
+						.newTreeMap(super.getServerRequestResponseHeaders(method, requesturl));
 				res.put("Location", "https://redirected/simple.bundle-v1");
 				return res;
 			}
-			return super.getServerRequestResponseHeaders(requesturl);
+			return super.getServerRequestResponseHeaders(method, requesturl);
 		}
 
 		@Override
-		public InputStream getServerRequestResponseStream(String requesturl) throws IOException {
+		public InputStream getServerRequestResponseStream(String method, String requesturl) throws IOException {
 			if ("https://redirected/simple.bundle-v1".equals(requesturl)) {
-				return getBundleInputStream("simple.bundle-v1");
+				return getBundleInputStream(method, "simple.bundle-v1");
 			}
-			return super.getServerRequestResponseStream(requesturl);
+			return super.getServerRequestResponseStream(method, requesturl);
 		}
 
 		@Override
-		protected InputStream getBundleInputStream(String bundleid) throws IOException {
+		protected InputStream getBundleInputStream(String method, String bundleid) throws IOException {
 			if (bundleid.equals("simple.bundle-v1")) {
 				return Files.newInputStream(bundleOutDir.resolve("simple.bundle-v1.jar"));
 			}
-			return super.getBundleInputStream(bundleid);
+			return super.getBundleInputStream(method, bundleid);
 		}
 
 	}

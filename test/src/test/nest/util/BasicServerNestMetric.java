@@ -49,7 +49,7 @@ public class BasicServerNestMetric implements NestMetric {
 	}
 
 	@Override
-	public Integer getServerRequestResponseCode(String requesturl) throws IOException {
+	public Integer getServerRequestResponseCode(String method, String requesturl) throws IOException {
 		System.out.println("BasicServerNestMetric.getServerRequestResponseCode() " + requesturl);
 		if (("https://testurl/bundle_signature_key/" + bundleSigningVersion).equals(requesturl)) {
 			return HttpURLConnection.HTTP_OK;
@@ -58,7 +58,7 @@ public class BasicServerNestMetric implements NestMetric {
 	}
 
 	@Override
-	public InputStream getServerRequestResponseStream(String requesturl) throws IOException {
+	public InputStream getServerRequestResponseStream(String method, String requesturl) throws IOException {
 		System.out.println("BasicServerNestMetric.getServerRequestResponseStream() " + requesturl);
 		if (("https://testurl/bundle_signature_key/" + bundleSigningVersion).equals(requesturl)) {
 			return new UnsyncByteArrayInputStream(bundleSigningKeyPair.getPublic().getEncoded());
@@ -66,13 +66,14 @@ public class BasicServerNestMetric implements NestMetric {
 		throw new IOException("No input: " + requesturl);
 	}
 
-	protected void applyBundleDownloadSignatureResponseHeaders(String requesturl, Map<String, String> result) {
+	protected void applyBundleDownloadSignatureResponseHeaders(String method, String requesturl,
+			Map<String, String> result) {
 		try {
 			String baseurl = "https://testurl/bundle/download/";
 			if (requesturl.startsWith(baseurl)) {
 				Signature sig = Signature.getInstance("SHA256withRSA");
 				sig.initSign(getBundleSigningPrivateKey());
-				try (InputStream in = getBundleInputStream(requesturl.substring(baseurl.length()))) {
+				try (InputStream in = getBundleInputStream(method, requesturl.substring(baseurl.length()))) {
 					StreamUtils.copyStream(in, sig);
 				}
 				byte[] signaturebytes = sig.sign();
@@ -84,8 +85,8 @@ public class BasicServerNestMetric implements NestMetric {
 		}
 	}
 
-	protected InputStream getBundleInputStream(String bundleid) throws IOException {
-		return getServerRequestResponseStream("https://testurl/bundle/download/" + bundleid);
+	protected InputStream getBundleInputStream(String method, String bundleid) throws IOException {
+		return getServerRequestResponseStream(method, "https://testurl/bundle/download/" + bundleid);
 	}
 
 	protected PrivateKey getBundleSigningPrivateKey() {
@@ -93,10 +94,10 @@ public class BasicServerNestMetric implements NestMetric {
 	}
 
 	@Override
-	public Map<String, String> getServerRequestResponseHeaders(String requesturl) {
-		System.out.println("BasicServerNestMetric.getServerRequestResponseHeaders() " + requesturl);
+	public Map<String, String> getServerRequestResponseHeaders(String method, String requesturl) {
+		System.out.println("BasicServerNestMetric.getServerRequestResponseHeaders() " + method + " " + requesturl);
 		Map<String, String> result = new TreeMap<>();
-		applyBundleDownloadSignatureResponseHeaders(requesturl, result);
+		applyBundleDownloadSignatureResponseHeaders(method, requesturl, result);
 		return result;
 	}
 }
