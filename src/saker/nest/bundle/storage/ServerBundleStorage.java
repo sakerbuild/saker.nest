@@ -2080,8 +2080,10 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 					loadedBundles.put(bundleid, got);
 
 					//if we successfully verified the bundle, persist the downloaded signature
-					if (downloadres.signature != null) {
+					if (downloadres.signature != null && downloadres.signature
+							.getVersion() >= signatureVerificationConfiguration.getMinSignatureVersion()) {
 						//persist the signature
+						//only persist if the downloaded signature is acceptable by the verification configuration that we used.
 						Path signaturefilepath = getBundleSignaturePathFromBundlePath(bundlejarpath);
 						try {
 							downloadres.signature.writeTo(signaturefilepath);
