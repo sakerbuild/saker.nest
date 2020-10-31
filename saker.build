@@ -380,7 +380,10 @@ test(
 			std.file.place(test/build),
 			$export[Path],
 		],
-		#ProcessJVMParameters: [ "-agentlib:jdwp=transport=dt_socket,address=localhost:5432,server=y,suspend=y,quiet=y" ],
+		ProcessJVMParameters: [
+			--illegal-access=deny,
+			#"-agentlib:jdwp=transport=dt_socket,address=localhost:5432,server=y,suspend=y,quiet=y"
+		],
 		MaxJVMCount: 1,
 		FailFast: true,
 		AbortOnFail: true,
@@ -390,46 +393,28 @@ test(
 
 }
 testjava8(){
-	include(
-		test,
-		jre: saker.java.sdk(8),
-	)
+	test(jre: saker.java.sdk(8))
 }
 testjava9(){
-	include(
-		test, 
-		jre: saker.java.sdk(9),
-	)
+	test(jre: saker.java.sdk(9))
 }
 testjava10(){
-	include(
-		test, 
-		jre: saker.java.sdk(10),
-	)
+	test(jre: saker.java.sdk(10))
 }
 testjava11(){
-	include(
-		test, 
-		jre: saker.java.sdk(11),
-	)
+	test(jre: saker.java.sdk(11))
 }
 testjava12(){
-	include(
-		test, 
-		jre: saker.java.sdk(12),
-	)
+	test(jre: saker.java.sdk(12))
 }
 testjava13(){
-	include(
-		test, 
-		jre: saker.java.sdk(13),
-	)
+	test(jre: saker.java.sdk(13))
 }
 testjava14(){
-	include(
-		test, 
-		jre: saker.java.sdk(14),
-	)
+	test(jre: saker.java.sdk(14))
+}
+testjava15(){
+	test(jre: saker.java.sdk(15))
 }
 
 _configure(
