@@ -45,7 +45,7 @@ public class JavaToolsModulePatcher {
 		return getJavaToolsClassLoaderImpl();
 	}
 
-	static ClassLoader getJavaToolsClassLoaderImpl() throws AssertionError {
+	static ClassLoader getJavaToolsClassLoaderImpl() throws IllegalStateException {
 		ClassLoader result = JAVA_TOOLS_CLASSLOADER;
 		if (result != null) {
 			return result;
@@ -73,9 +73,9 @@ public class JavaToolsModulePatcher {
 		return PatchedModuleClassLoaderResolver.INSTANCE;
 	}
 
-	private static volatile ClassLoader JAVA_TOOLS_CLASSLOADER = createJavaToolsClassLoader();
+	private static volatile ClassLoader JAVA_TOOLS_CLASSLOADER;
 
-	private static ClassLoader createJavaToolsClassLoader() throws AssertionError {
+	private static ClassLoader createJavaToolsClassLoader() throws IllegalStateException {
 		//open module so everyone can access it
 		ModuleDescriptor.Builder njdkbuilder = ModuleDescriptor.newModule(MODULE_NAME_JDK_COMPILER,
 				Collections.singleton(Modifier.OPEN));
@@ -104,7 +104,7 @@ public class JavaToolsModulePatcher {
 			}
 		}
 		if (jdkcompilerresolvedmodule == null) {
-			throw new AssertionError("Module not found: " + MODULE_NAME_JDK_COMPILER);
+			throw new IllegalStateException("Module not found: " + MODULE_NAME_JDK_COMPILER);
 		}
 		ModuleReference jdkcompilermoduleref = jdkcompilerresolvedmodule.reference();
 		ModuleReference njdkmoduleref = new ModuleReference(njdkbuilder.build(),
