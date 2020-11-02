@@ -39,6 +39,10 @@ import saker.nest.exc.BundleLoadingFailedException;
 import sipka.cmdline.api.Converter;
 import sipka.cmdline.api.Parameter;
 import sipka.cmdline.api.PositionalParameter;
+import sipka.cmdline.runtime.InvalidArgumentFormatException;
+import sipka.cmdline.runtime.InvalidArgumentValueException;
+import sipka.cmdline.runtime.MissingArgumentException;
+import sipka.cmdline.runtime.ParseUtil;
 import sipka.cmdline.runtime.ParsingIterator;
 
 /**
@@ -61,6 +65,10 @@ import sipka.cmdline.runtime.ParsingIterator;
  * </pre>
  */
 public class MainCommand {
+
+	private static final String PARAM_NAME_BUNDLE = "-bundle";
+	private static final String PARAM_NAME_U = "-U";
+
 	public static enum SystemExitConfiguration {
 		ALWAYS,
 		ON_EXCEPTION,
@@ -97,7 +105,7 @@ public class MainCommand {
 	 * arguments parameter is used as bundle identifier.
 	 * </pre>
 	 */
-	@Parameter("-bundle")
+	@Parameter(PARAM_NAME_BUNDLE)
 	@Converter(method = "toBundleIdentifier")
 	public BundleIdentifier bundle;
 
@@ -232,10 +240,10 @@ public class MainCommand {
 	 * -U user parameters for the build execution.
 	 * </pre>
 	 */
-	@Parameter("-U")
+	@Parameter(PARAM_NAME_U)
 	public void userParameter(String key, String value) {
 		if (userParameters.containsKey(key)) {
-			throw new IllegalArgumentException("User parameter specified multiple times: " + key);
+			throw new InvalidArgumentValueException("User parameter specified multiple times: " + key, PARAM_NAME_U);
 		}
 		userParameters.put(key, value);
 	}
@@ -244,7 +252,10 @@ public class MainCommand {
 		BundleIdentifier bundleid;
 		if (this.bundle == null) {
 			if (arguments.isEmpty()) {
-				throw new IllegalArgumentException("No arguments specified. Bundle identifier must be first.");
+				throw new MissingArgumentException(PARAM_NAME_BUNDLE,
+						"No arguments or " + PARAM_NAME_BUNDLE
+								+ " specified. Pass the bundle identifier as the first argument or use the "
+								+ PARAM_NAME_BUNDLE + " parameter.");
 			}
 			bundleid = BundleIdentifier.valueOf(arguments.remove(0));
 		} else {
@@ -289,12 +300,17 @@ public class MainCommand {
 		}
 	}
 
-	public static BundleIdentifier toBundleIdentifier(ParsingIterator it) {
-		return BundleIdentifier.valueOf(it.next());
+	public static BundleIdentifier toBundleIdentifier(String parametername, ParsingIterator it) {
+		String n = ParseUtil.requireNextArgument(parametername, it);
+		try {
+			return BundleIdentifier.valueOf(n);
+		} catch (IllegalArgumentException e) {
+			throw new InvalidArgumentFormatException("Invalid bundle identifier.", e, n);
+		}
 	}
 
-	public static List<String> parseRemainingCommand(Iterator<String> it) {
-		ArrayList<String> result = new ArrayList<>();
+	public static List<String> parseRemainingCommand(String parametername, Iterator<String> it) {
+		List<String> result = new ArrayList<>();
 		while (it.hasNext()) {
 			result.add(it.next());
 		}

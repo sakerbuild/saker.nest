@@ -40,6 +40,7 @@ import saker.nest.bundle.storage.LocalBundleStorageView.InstallResult;
 import sipka.cmdline.api.Converter;
 import sipka.cmdline.api.Parameter;
 import sipka.cmdline.api.PositionalParameter;
+import sipka.cmdline.runtime.InvalidArgumentValueException;
 
 /**
  * <pre>
@@ -54,6 +55,10 @@ import sipka.cmdline.api.PositionalParameter;
  * </pre>
  */
 public class LocalInstallBundleCommand {
+	private static final String PARAM_NAME_U = "-U";
+	private static final String PARAM_NAME_STORAGE = "-storage";
+	private static final String PARAM_NAME_BUNDLES = "bundles";
+
 	/**
 	 * <pre>
 	 * One or more paths to the bundles that should be installed.
@@ -62,7 +67,7 @@ public class LocalInstallBundleCommand {
 	 * all Java archives in the current directory as saker.nest bundles.
 	 * </pre>
 	 */
-	@Parameter
+	@Parameter(PARAM_NAME_BUNDLES)
 	@PositionalParameter(value = -1)
 	@Converter(method = "parseRemainingCommand")
 	public Set<String> bundles = new LinkedHashSet<>();
@@ -88,7 +93,7 @@ public class LocalInstallBundleCommand {
 	 * It is "local" by default.
 	 * </pre>
 	 */
-	@Parameter("-storage")
+	@Parameter(PARAM_NAME_STORAGE)
 	public String storage = ConfiguredRepositoryStorage.STORAGE_TYPE_LOCAL;
 
 	private Map<String, String> userParameters = new TreeMap<>();
@@ -101,10 +106,10 @@ public class LocalInstallBundleCommand {
 	 * -U user parameters for the build execution.
 	 * </pre>
 	 */
-	@Parameter("-U")
+	@Parameter(PARAM_NAME_U)
 	public void userParameter(String key, String value) {
 		if (userParameters.containsKey(key)) {
-			throw new IllegalArgumentException("User parameter specified multiple times: " + key);
+			throw new InvalidArgumentValueException("User parameter specified multiple times: " + key, PARAM_NAME_U);
 		}
 		userParameters.put(key, value);
 	}
@@ -112,7 +117,12 @@ public class LocalInstallBundleCommand {
 	public void call(ExecuteActionCommand execute) throws InvalidPathFormatException, IOException {
 		Set<WildcardPath> wildcards = new LinkedHashSet<>();
 		for (String b : bundles) {
-			WildcardPath wp = WildcardPath.valueOf(b);
+			WildcardPath wp;
+			try {
+				wp = WildcardPath.valueOf(b);
+			} catch (IllegalArgumentException e) {
+				throw new InvalidArgumentValueException("Invalid bundle path wildcard.", e, PARAM_NAME_BUNDLES);
+			}
 			wildcards.add(wp);
 		}
 		SakerPath workingdir = SakerPath.valueOf(System.getProperty("user.dir"));
@@ -128,8 +138,8 @@ public class LocalInstallBundleCommand {
 			Map<String, ? extends LocalBundleStorageView> localstorages = configuredstorage.getLocalStorages();
 			LocalBundleStorageView installstorage = localstorages.get(storage);
 			if (installstorage == null) {
-				throw new IllegalArgumentException("Local storage not found in configuration with name: " + storage
-						+ " (Available: " + localstorages.keySet() + ")");
+				throw new InvalidArgumentValueException("Local storage not found in configuration with name: " + storage
+						+ " (Available: " + localstorages.keySet() + ")", PARAM_NAME_STORAGE);
 			}
 			for (Entry<SakerPath, ? extends BasicFileAttributes> entry : bundles.entrySet()) {
 				SakerPath bundlepath = entry.getKey();
@@ -146,7 +156,7 @@ public class LocalInstallBundleCommand {
 		}
 	}
 
-	public static Set<String> parseRemainingCommand(Iterator<String> it) {
+	public static Set<String> parseRemainingCommand(String parametername, Iterator<String> it) {
 		Set<String> result = new LinkedHashSet<>();
 		while (it.hasNext()) {
 			result.add(it.next());

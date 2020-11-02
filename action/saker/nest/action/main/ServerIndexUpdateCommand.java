@@ -33,6 +33,7 @@ import saker.nest.NestRepositoryFactory;
 import saker.nest.bundle.storage.AbstractServerBundleStorageView;
 import sipka.cmdline.api.MultiParameter;
 import sipka.cmdline.api.Parameter;
+import sipka.cmdline.runtime.InvalidArgumentValueException;
 
 /**
  * <pre>
@@ -48,6 +49,8 @@ import sipka.cmdline.api.Parameter;
  * </pre>
  */
 public class ServerIndexUpdateCommand {
+	private static final String PARAM_NAME_U = "-U";
+	private static final String PARAM_NAME_STORAGE = "-storage";
 
 	/**
 	 * <pre>
@@ -55,7 +58,7 @@ public class ServerIndexUpdateCommand {
 	 * of which the index files should be updated.
 	 * </pre>
 	 */
-	@Parameter("-storage")
+	@Parameter(PARAM_NAME_STORAGE)
 	@MultiParameter(String.class)
 	public Set<String> storage = new TreeSet<>();
 
@@ -82,10 +85,10 @@ public class ServerIndexUpdateCommand {
 	 * -U user parameters for the build execution.
 	 * </pre>
 	 */
-	@Parameter("-U")
+	@Parameter(PARAM_NAME_U)
 	public void userParameter(String key, String value) {
 		if (userParameters.containsKey(key)) {
-			throw new IllegalArgumentException("User parameter specified multiple times: " + key);
+			throw new InvalidArgumentValueException("User parameter specified multiple times: " + key, PARAM_NAME_U);
 		}
 		userParameters.put(key, value);
 	}

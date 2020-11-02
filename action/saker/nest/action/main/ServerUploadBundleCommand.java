@@ -17,6 +17,7 @@ package saker.nest.action.main;
 
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Base64;
@@ -33,6 +34,8 @@ import sipka.cmdline.api.Converter;
 import sipka.cmdline.api.Flag;
 import sipka.cmdline.api.Parameter;
 import sipka.cmdline.api.PositionalParameter;
+import sipka.cmdline.runtime.InvalidArgumentFormatException;
+import sipka.cmdline.runtime.ParseUtil;
 import sipka.cmdline.runtime.ParsingIterator;
 
 /**
@@ -114,15 +117,20 @@ public class ServerUploadBundleCommand {
 	/**
 	 * @cmd-format &lt;base64&gt;
 	 */
-	public static byte[] parseBase64Key(ParsingIterator it) {
-		String n = it.next();
+	public static byte[] parseBase64Key(String parametername, ParsingIterator it) {
+		String n = ParseUtil.requireNextArgument(parametername, it);
 		return Base64.getUrlDecoder().decode(n);
 	}
 
 	/**
 	 * @cmd-format &lt;file-path&gt;
 	 */
-	public static Path parseRemainingPathCommand(Iterator<String> it) {
-		return Paths.get(it.next());
+	public static Path parseRemainingPathCommand(String parametername, Iterator<String> it) {
+		String pathstr = ParseUtil.requireNextArgument(parametername, it);
+		try {
+			return Paths.get(pathstr);
+		} catch (InvalidPathException e) {
+			throw new InvalidArgumentFormatException("Invalid local path format for: " + pathstr, e, parametername);
+		}
 	}
 }
