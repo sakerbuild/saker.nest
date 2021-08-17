@@ -1,5 +1,5 @@
 # UPDATE saker.nest.meta.Versions when updating this value
-global(saker.nest.VERSION) = "0.8.7"
+global(saker.nest.VERSION) = "0.8.8"
 global(VERSION_saker.apiextract) = "0.8.1"
 global(VERSION_sipka.cmdline) = "0.8.3"
 
