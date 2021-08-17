@@ -311,6 +311,8 @@ test(
 			$testexport[testutiljavac],
 		],
 		Identifier: test,
+		SourceVersion: 8,
+		TargetVersion: 8,
 	)
 	
 	$unittest = saker.java.test(
