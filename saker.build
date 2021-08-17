@@ -25,6 +25,9 @@ compile(
 			saker.java.classpath.bundle("saker.build-api-v{ static(VERSION_saker.build) }")
 		],
 		Identifier: "testapi{ $buildconfig[TestingId] }",
+		SDKs: {
+			Java: saker.java.sdk(8)
+		},
 	)
 	
 	$main = saker.java.compile(
@@ -41,6 +44,9 @@ compile(
 		],
 		Identifier: "main{ $buildconfig[TestingId] }{ $buildconfig[ApiDocId] }",
 		CompilerOptions: $buildconfig[JavaCompilerOptions],
+		SDKs: {
+			Java: saker.java.sdk(8)
+		},
 	)
 	
 	$action = saker.java.compile(
@@ -65,15 +71,18 @@ compile(
 		],
 		Identifier: "action{ $buildconfig[TestingId] }{ $buildconfig[ApiDocId] }",
 		CompilerOptions: $buildconfig[JavaCompilerOptions],
+		SDKs: {
+			Java: saker.java.sdk(8)
+		},
 	)
 	$jdk9util = saker.java.compile(
 		SourceDirectories: jdkutil/jdk9/,
 		Identifier: "jdk9-util{ $buildconfig[TestingId] }{ $buildconfig[ApiDocId] }",
+		ClassPath: $testapicompile,
+		CompilerOptions: $buildconfig[JavaCompilerOptions],
 		SDKs: {
 			Java: saker.java.sdk(9)
 		},
-		ClassPath: $testapicompile,
-		CompilerOptions: $buildconfig[JavaCompilerOptions],
 	)
 }
 apicompile(
