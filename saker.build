@@ -251,6 +251,9 @@ testexport(
 			$export[compile][testapicompile],
 		],
 		Identifier: test-utils,
+		SDKs: {
+			Java: saker.java.sdk(8)
+		},
 	)
 	$testutiljar = saker.jar.create(
 		Output: saker.nest-test-utils.jar,
@@ -345,7 +348,10 @@ test(
 		NonDeterministicTests: [
 			**,
 		],
-		#ProcessJVMParameters: [ "-agentlib:jdwp=transport=dt_socket,address=localhost:5432,server=y,suspend=y,quiet=y" ],
+		ProcessJVMParameters: [
+			--illegal-access=deny,
+			#"-agentlib:jdwp=transport=dt_socket,address=localhost:5432,server=y,suspend=y,quiet=y"
+		],
 		MaxJVMCount: 1,
 		FailFast: true,
 		AbortOnFail: true,
