@@ -271,10 +271,10 @@ public final class NestRepositoryImpl implements SakerRepository, NestRepository
 				path = path.resolve(hash.sha256);
 			} else {
 				if (hash.sha1 != null) {
-					path = path.resolve("sha1-" + hash.sha256);
+					path = path.resolve("sha1-" + hash.sha1);
 				} else {
 					if (hash.md5 != null) {
-						path = path.resolve("md5-" + hash.sha256);
+						path = path.resolve("md5-" + hash.md5);
 					}
 				}
 			}
