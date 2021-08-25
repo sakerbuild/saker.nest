@@ -27,7 +27,9 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -40,6 +42,7 @@ import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 
 import saker.build.file.StreamWritable;
+import saker.build.file.path.PathKey;
 import saker.build.file.path.ProviderHolderPathKey;
 import saker.build.file.path.SakerPath;
 import saker.build.file.path.SimpleProviderHolderPathKey;
@@ -196,14 +199,15 @@ public class NestIntegrationTestUtils {
 		createStreamWritableJarFromDirectoryWithClasses(fp, directory, addclasses).writeTo((OutputStream) jarbyteos);
 		byte[] jarbytes = jarbyteos.toByteArray();
 		SakerFileProvider targetfp = target.getFileProvider();
+		SakerPath targetpath = target.getPath();
 		try {
-			byte[] presentbytes = targetfp.getAllBytes(target.getPath()).copyOptionally();
+			byte[] presentbytes = targetfp.getAllBytes(targetpath).copyOptionally();
 			if (Arrays.equals(presentbytes, jarbytes)) {
 				return;
 			}
 		} catch (IOException e) {
 		}
-		targetfp.writeToFile(new UnsyncByteArrayInputStream(jarbytes), target.getPath());
+		targetfp.writeToFile(new UnsyncByteArrayInputStream(jarbytes), targetpath);
 	}
 
 	public static void createJarFromDirectory(SakerFileProvider fp, SakerPath directory, Path target)
@@ -211,33 +215,39 @@ public class NestIntegrationTestUtils {
 		createJarFromDirectoryWithClasses(fp, directory, target, Collections.emptySet());
 	}
 
-	public static void createAllJarsFromDirectoriesWithClasses(SakerFileProvider fp, SakerPath directory,
-			ProviderHolderPathKey targetdirectory, Map<String, ? extends Set<Class<?>>> addclasses) throws IOException {
+	public static Collection<? extends PathKey> createAllJarsFromDirectoriesWithClasses(SakerFileProvider fp,
+			SakerPath directory, ProviderHolderPathKey targetdirectory, Map<String, ? extends Set<Class<?>>> addclasses)
+			throws IOException {
 		NavigableMap<String, ? extends FileEntry> entries = fp.getDirectoryEntries(directory);
+		HashSet<PathKey> result = new HashSet<>();
 		if (entries.isEmpty()) {
-			return;
+			return result;
 		}
 		targetdirectory.getFileProvider().createDirectories(targetdirectory.getPath());
 		for (Entry<String, ? extends FileEntry> entry : entries.entrySet()) {
 			if (entry.getValue().isDirectory()) {
 				String filename = entry.getKey();
-				createJarFromDirectoryWithClasses(fp, directory.resolve(filename),
-						new SimpleProviderHolderPathKey(targetdirectory,
-								targetdirectory.getPath().resolve(entry.getKey() + ".jar")),
+				SakerPath targetpath = targetdirectory.getPath().resolve(entry.getKey() + ".jar");
+				SimpleProviderHolderPathKey targetpathkey = new SimpleProviderHolderPathKey(targetdirectory,
+						targetpath);
+				createJarFromDirectoryWithClasses(fp, directory.resolve(filename), targetpathkey,
 						ObjectUtils.getMapValue(addclasses, filename));
+				result.add(targetpathkey);
 			}
 		}
+		return result;
 	}
 
-	public static void createAllJarsFromDirectoriesWithClasses(SakerFileProvider fp, SakerPath directory,
-			Path targetdirectory, Map<String, ? extends Set<Class<?>>> addclasses) throws IOException {
-		createAllJarsFromDirectoriesWithClasses(fp, directory,
+	public static Collection<? extends PathKey> createAllJarsFromDirectoriesWithClasses(SakerFileProvider fp,
+			SakerPath directory, Path targetdirectory, Map<String, ? extends Set<Class<?>>> addclasses)
+			throws IOException {
+		return createAllJarsFromDirectoriesWithClasses(fp, directory,
 				LocalFileProvider.getInstance().getPathKey(targetdirectory), addclasses);
 	}
 
-	public static void createAllJarsFromDirectories(SakerFileProvider fp, SakerPath directory, Path targetdirectory)
-			throws IOException {
-		createAllJarsFromDirectoriesWithClasses(fp, directory, targetdirectory, Collections.emptyMap());
+	public static Collection<? extends PathKey> createAllJarsFromDirectories(SakerFileProvider fp, SakerPath directory,
+			Path targetdirectory) throws IOException {
+		return createAllJarsFromDirectoriesWithClasses(fp, directory, targetdirectory, Collections.emptyMap());
 	}
 
 	public static String createParameterBundlesParameter(Set<String> bundlenames, Path basedir) {

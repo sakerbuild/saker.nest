@@ -44,6 +44,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -118,6 +119,7 @@ import saker.nest.thirdparty.org.json.JSONArray;
 import saker.nest.thirdparty.org.json.JSONObject;
 import saker.nest.utils.IdentityComparisonPair;
 import saker.nest.utils.NonSpaceIterator;
+import testing.saker.nest.TestFlag;
 
 public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorageConfiguration {
 
@@ -447,7 +449,13 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			return null;
 		}
 		synchronized (classLoaderLock) {
-			return createDomainClassLoaderLockedImpl(domain);
+			return createDomainClassLoaderLockedImpl(domain, (d, e) -> {
+				//XXX log exception?
+				if (TestFlag.ENABLED) {
+					e.printStackTrace();
+				}
+				return;
+			});
 		}
 	}
 
@@ -1264,7 +1272,11 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 				}
 			}
 
-			NestRepositoryBundleClassLoader result = createDomainClassLoaderLockedImpl(rootbundledomain);
+			NestRepositoryBundleClassLoader result = createDomainClassLoaderLockedImpl(rootbundledomain,
+					(domain, e) -> {
+						throw new AssertionError("Failed to retrieve previously resolved bundle. ("
+								+ domain.bundle.getBundleIdentifier() + ")", e);
+					});
 
 			classLoaders.putIfAbsent(bundle, result);
 			return result;
@@ -1274,7 +1286,8 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 	/**
 	 * Locked on {@link #classLoaderLock}.
 	 */
-	private NestRepositoryBundleClassLoader createDomainClassLoaderLockedImpl(ClassLoaderDomain rootbundledomain) {
+	private NestRepositoryBundleClassLoader createDomainClassLoaderLockedImpl(ClassLoaderDomain rootbundledomain,
+			BiConsumer<? super ClassLoaderDomain, ? super BundleLoadingFailedException> bundleloadingfailurehandler) {
 		{
 			NestRepositoryBundleClassLoader presentrootdomaincl = domainClassLoaders.get(rootbundledomain);
 			if (presentrootdomaincl != null) {
@@ -1299,9 +1312,8 @@ public class ConfiguredRepositoryStorage implements Closeable, NestBundleStorage
 			try {
 				domainbundle = domainbundlestorage.getBundle(domain.bundle.getBundleIdentifier());
 			} catch (BundleLoadingFailedException e) {
-				throw new AssertionError(
-						"Failed to retrieve previously resolved bundle. (" + domain.bundle.getBundleIdentifier() + ")",
-						e);
+				bundleloadingfailurehandler.accept(domain, e);
+				return null;
 			}
 			Map<BundleKey, DependentClassLoader<NestRepositoryBundleClassLoader>> dependencyclassloaders = new LinkedHashMap<>();
 

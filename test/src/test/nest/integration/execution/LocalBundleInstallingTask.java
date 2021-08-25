@@ -53,8 +53,9 @@ public class LocalBundleInstallingTask implements TaskFactory<String>, Parameter
 			throw new AssertionError(
 					"Invalid number of local storages: " + localstorages.size() + " - " + localstorages);
 		}
-		localstorages.iterator().next().install(exporter);
-		System.out.println("LocalBundleChangeTaskTest.ExportingTask.run() " + cl.getBundle().getStorage());
+		LocalBundleStorageView localstorage = localstorages.iterator().next();
+		localstorage.install(exporter);
+		System.out.println("LocalBundleInstallingTask.run() " + localstorage.getStorage());
 		return "export";
 	}
 
