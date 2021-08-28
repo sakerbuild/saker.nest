@@ -109,6 +109,7 @@ import saker.nest.thirdparty.org.json.JSONArray;
 import saker.nest.thirdparty.org.json.JSONException;
 import saker.nest.thirdparty.org.json.JSONObject;
 import saker.nest.thirdparty.org.json.JSONTokener;
+import testing.saker.nest.NestMetric;
 import testing.saker.nest.TestFlag;
 
 public class ServerBundleStorage extends AbstractBundleStorage {
@@ -646,13 +647,13 @@ public class ServerBundleStorage extends AbstractBundleStorage {
 		}
 		try {
 			if (TestFlag.ENABLED) {
-				Integer rc = TestFlag.metric().getServerRequestResponseCode(method, url.toString());
+				NestMetric metric = TestFlag.metric();
+				String urlstr = url.toString();
+				Integer rc = metric.getServerRequestResponseCode(method, urlstr);
 				if (rc != null) {
-					return handler.handle(url, rc,
-							() -> TestFlag.metric().getServerRequestResponseStream(method, url.toString()),
-							() -> TestFlag.metric().getServerRequestResponseErrorStream(method, url.toString()),
-							(header) -> TestFlag.metric().getServerRequestResponseHeaders(method, url.toString())
-									.get(header));
+					return handler.handle(url, rc, () -> metric.getServerRequestResponseStream(method, urlstr),
+							() -> metric.getServerRequestResponseErrorStream(method, urlstr),
+							(header) -> metric.getServerRequestResponseHeaders(method, urlstr).get(header));
 				}
 			}
 			HttpURLConnection connection = (HttpURLConnection) url.openConnection();
