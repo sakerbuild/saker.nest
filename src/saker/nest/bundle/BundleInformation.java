@@ -727,6 +727,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	 * 
 	 * @param jis
 	 *            The JAR input.
+	 * @return The created bundle information.
 	 * @throws NullPointerException
 	 *             If the argument is <code>null</code>.
 	 * @throws IOException
@@ -748,6 +749,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	 * 
 	 * @param jf
 	 *            The JAR file.
+	 * @return The created bundle information.
 	 * @throws NullPointerException
 	 *             If the argument is <code>null</code>.
 	 * @throws IOException
@@ -769,6 +771,7 @@ public final class BundleInformation implements BundleIdentifierHolder, External
 	 * 
 	 * @param zf
 	 *            The Zip file.
+	 * @return The created bundle information.
 	 * @throws NullPointerException
 	 *             If the argument is <code>null</code>.
 	 * @throws IOException
