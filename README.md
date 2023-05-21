@@ -1,6 +1,6 @@
 # saker.nest
 
-![Build status](https://img.shields.io/azure-devops/build/sakerbuild/8cec740c-3729-415e-92e5-b7af8142fb75/7/master) [![Latest version](https://mirror.nest.saker.build/badges/saker.nest/version.svg)](https://nest.saker.build/package/saker.nest "saker.nest | saker.nest")
+[![Build status](https://img.shields.io/azure-devops/build/sakerbuild/8cec740c-3729-415e-92e5-b7af8142fb75/7/master)](https://dev.azure.com/sakerbuild/saker.nest/_build) [![Latest version](https://mirror.nest.saker.build/badges/saker.nest/version.svg)](https://nest.saker.build/package/saker.nest "saker.nest | saker.nest")
 
 The default package and build task repository for the [saker.build system](https://saker.build). The repository is loaded automatically by the build system and allows accessing the build tasks provided by it.
 
