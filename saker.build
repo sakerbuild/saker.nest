@@ -14,7 +14,7 @@ compile(
 	out testapicompile,
 	out jdk9util,
 	
-	in buildconfig = include(_configure)[buildconfig], 
+	in buildconfig = _configure()[buildconfig], 
 ) {
 	$testapicompile = saker.java.compile(
 		SourceDirectories: [
@@ -88,12 +88,12 @@ compile(
 apicompile(
 	out compile,
 ) {
-	$compile = include(compile, buildconfig: include(_configure, apidoc: true)[buildconfig])
+	$compile = compile(buildconfig: _configure(apidoc: true)[buildconfig])
 }
 apiexport(
 	out jar,
 ){
-	$compile = include(apicompile)[compile]
+	$compile = apicompile()[compile]
 	$jar = saker.jar.create(
 		Output: saker.nest-api.jar,
 		Resources: [
@@ -120,9 +120,9 @@ export(
 	out jar,
 	out Path = $jar[Path],
 	
-	in buildconfig = include(_configure)[buildconfig], 
+	in buildconfig = _configure()[buildconfig], 
 ) {
-	$compile = include(compile, buildconfig: $buildconfig)
+	$compile = compile(buildconfig: $buildconfig)
 	$main = $compile[main]
 	$action = $compile[action]
 	$jar = saker.jar.create(
@@ -185,9 +185,9 @@ exportall(
 		$testexport[testinstrumentationjar][Path],
 	]
 ){
-	$export = include(export)
-	$apiexport = include(apiexport)
-	$testexport = include(testexport)
+	$export = export()
+	$apiexport = apiexport()
+	$testexport = testexport()
 	$sourcejar = saker.jar.create(
 		Output: saker.nest-sources.jar,
 		Resources: [
@@ -217,11 +217,11 @@ exportall(
 	)
 }
 install() {
-	$exportall = include(exportall)
+	$exportall = exportall()
 	nest.local.install($exportall[bundlepaths])
 }
 upload() {
-	$export = include(exportall, Path: saker.build)
+	$export = exportall(Path: saker.build)
 	include(Path: secret/secrets.build)
 	nest.server.upload(
 		Bundles: $export[bundlepaths],
@@ -231,7 +231,7 @@ upload() {
 	)
 }
 testexport(
-	in export = include(export, buildconfig: include(_configure, testing: true)[buildconfig]),
+	in export = export(buildconfig: _configure(testing: true)[buildconfig]),
 	out export,
 	in compile = $export[compile],
 	
@@ -297,9 +297,10 @@ testexport(
 	)
 }
 test(
-	in jre = saker.java.sdk(8),
+	in javaversion = 8,
+	in jre = saker.java.sdk($javaversion),
 ) {
-	$testexport = include(testexport)
+	$testexport = testexport()
 	$export = $testexport[export]
 	$compile = $export[compile]
 	
@@ -408,30 +409,6 @@ test(
 		Verbose: true,
 	)
 
-}
-testjava8(){
-	test(jre: saker.java.sdk(8))
-}
-testjava9(){
-	test(jre: saker.java.sdk(9))
-}
-testjava10(){
-	test(jre: saker.java.sdk(10))
-}
-testjava11(){
-	test(jre: saker.java.sdk(11))
-}
-testjava12(){
-	test(jre: saker.java.sdk(12))
-}
-testjava13(){
-	test(jre: saker.java.sdk(13))
-}
-testjava14(){
-	test(jre: saker.java.sdk(14))
-}
-testjava15(){
-	test(jre: saker.java.sdk(15))
 }
 
 _configure(
